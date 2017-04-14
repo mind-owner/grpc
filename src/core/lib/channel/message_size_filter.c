@@ -122,7 +122,7 @@ static void recv_message_ready(grpc_exec_ctx* exec_ctx, void* user_data,
                  (*calld->recv_message)->length, calld->max_recv_size);
     grpc_error* new_error = grpc_error_set_int(
         GRPC_ERROR_CREATE_FROM_COPIED_STRING(message_string),
-        GRPC_ERROR_INT_GRPC_STATUS, GRPC_STATUS_INVALID_ARGUMENT);
+        GRPC_ERROR_INT_GRPC_STATUS, GRPC_STATUS_RESOURCE_EXHAUSTED);
     if (error == GRPC_ERROR_NONE) {
       error = new_error;
     } else {
@@ -152,7 +152,7 @@ static void start_transport_stream_op_batch(
         exec_ctx, op,
         grpc_error_set_int(GRPC_ERROR_CREATE_FROM_COPIED_STRING(message_string),
                            GRPC_ERROR_INT_GRPC_STATUS,
-                           GRPC_STATUS_INVALID_ARGUMENT));
+                           GRPC_STATUS_RESOURCE_EXHAUSTED));
     gpr_free(message_string);
     return;
   }
@@ -218,14 +218,14 @@ static grpc_error* init_channel_elem(grpc_exec_ctx* exec_ctx,
     if (strcmp(args->channel_args->args[i].key,
                GRPC_ARG_MAX_SEND_MESSAGE_LENGTH) == 0) {
       const grpc_integer_options options = {
-          GRPC_DEFAULT_MAX_SEND_MESSAGE_LENGTH, 0, INT_MAX};
+          GRPC_DEFAULT_MAX_SEND_MESSAGE_LENGTH, -1, INT_MAX};
       chand->max_send_size =
           grpc_channel_arg_get_integer(&args->channel_args->args[i], options);
     }
     if (strcmp(args->channel_args->args[i].key,
                GRPC_ARG_MAX_RECEIVE_MESSAGE_LENGTH) == 0) {
       const grpc_integer_options options = {
-          GRPC_DEFAULT_MAX_RECV_MESSAGE_LENGTH, 0, INT_MAX};
+          GRPC_DEFAULT_MAX_RECV_MESSAGE_LENGTH, -1, INT_MAX};
       chand->max_recv_size =
           grpc_channel_arg_get_integer(&args->channel_args->args[i], options);
     }
