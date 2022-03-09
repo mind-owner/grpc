@@ -1,66 +1,69 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #include "src/cpp/thread_manager/thread_manager.h"
 
 #include <climits>
-#include <mutex>
-#include <thread>
 
 #include <grpc/support/log.h>
+
+#include "src/core/lib/gprpp/thd.h"
+#include "src/core/lib/iomgr/exec_ctx.h"
 
 namespace grpc {
 
 ThreadManager::WorkerThread::WorkerThread(ThreadManager* thd_mgr)
-    : thd_mgr_(thd_mgr), thd_(&ThreadManager::WorkerThread::Run, this) {}
+    : thd_mgr_(thd_mgr) {
+  // Make thread creation exclusive with respect to its join happening in
+  // ~WorkerThread().
+  thd_ = grpc_core::Thread(
+      "grpcpp_sync_server",
+      [](void* th) { static_cast<ThreadManager::WorkerThread*>(th)->Run(); },
+      this, &created_);
+  if (!created_) {
+    gpr_log(GPR_ERROR, "Could not create grpc_sync_server worker-thread");
+  }
+}
 
 void ThreadManager::WorkerThread::Run() {
   thd_mgr_->MainWorkLoop();
   thd_mgr_->MarkAsCompleted(this);
 }
 
-ThreadManager::WorkerThread::~WorkerThread() { thd_.join(); }
+ThreadManager::WorkerThread::~WorkerThread() {
+  // Don't join until the thread is fully constructed.
+  thd_.Join();
+}
 
-ThreadManager::ThreadManager(int min_pollers, int max_pollers)
+ThreadManager::ThreadManager(const char*, grpc_resource_quota* resource_quota,
+                             int min_pollers, int max_pollers)
     : shutdown_(false),
+      thread_quota_(
+          grpc_core::ResourceQuota::FromC(resource_quota)->thread_quota()),
       num_pollers_(0),
       min_pollers_(min_pollers),
       max_pollers_(max_pollers == -1 ? INT_MAX : max_pollers),
-      num_threads_(0) {}
+      num_threads_(0),
+      max_active_threads_sofar_(0) {}
 
 ThreadManager::~ThreadManager() {
   {
-    std::unique_lock<std::mutex> lock(mu_);
+    grpc_core::MutexLock lock(&mu_);
     GPR_ASSERT(num_threads_ == 0);
   }
 
@@ -68,111 +71,189 @@ ThreadManager::~ThreadManager() {
 }
 
 void ThreadManager::Wait() {
-  std::unique_lock<std::mutex> lock(mu_);
+  grpc_core::MutexLock lock(&mu_);
   while (num_threads_ != 0) {
-    shutdown_cv_.wait(lock);
+    shutdown_cv_.Wait(&mu_);
   }
 }
 
 void ThreadManager::Shutdown() {
-  std::unique_lock<std::mutex> lock(mu_);
+  grpc_core::MutexLock lock(&mu_);
   shutdown_ = true;
 }
 
 bool ThreadManager::IsShutdown() {
-  std::unique_lock<std::mutex> lock(mu_);
+  grpc_core::MutexLock lock(&mu_);
   return shutdown_;
+}
+
+int ThreadManager::GetMaxActiveThreadsSoFar() {
+  grpc_core::MutexLock list_lock(&list_mu_);
+  return max_active_threads_sofar_;
 }
 
 void ThreadManager::MarkAsCompleted(WorkerThread* thd) {
   {
-    std::unique_lock<std::mutex> list_lock(list_mu_);
+    grpc_core::MutexLock list_lock(&list_mu_);
     completed_threads_.push_back(thd);
   }
 
-  std::unique_lock<std::mutex> lock(mu_);
-  num_threads_--;
-  if (num_threads_ == 0) {
-    shutdown_cv_.notify_one();
+  {
+    grpc_core::MutexLock lock(&mu_);
+    num_threads_--;
+    if (num_threads_ == 0) {
+      shutdown_cv_.Signal();
+    }
   }
+
+  // Give a thread back to the resource quota
+  thread_quota_->Release(1);
 }
 
 void ThreadManager::CleanupCompletedThreads() {
-  std::unique_lock<std::mutex> lock(list_mu_);
-  for (auto thd = completed_threads_.begin(); thd != completed_threads_.end();
-       thd = completed_threads_.erase(thd)) {
-    delete *thd;
+  std::list<WorkerThread*> completed_threads;
+  {
+    // swap out the completed threads list: allows other threads to clean up
+    // more quickly
+    grpc_core::MutexLock lock(&list_mu_);
+    completed_threads.swap(completed_threads_);
   }
+  for (auto thd : completed_threads) delete thd;
 }
 
 void ThreadManager::Initialize() {
+  if (!thread_quota_->Reserve(min_pollers_)) {
+    gpr_log(GPR_ERROR,
+            "No thread quota available to even create the minimum required "
+            "polling threads (i.e %d). Unable to start the thread manager",
+            min_pollers_);
+    abort();
+  }
+
+  {
+    grpc_core::MutexLock lock(&mu_);
+    num_pollers_ = min_pollers_;
+    num_threads_ = min_pollers_;
+    max_active_threads_sofar_ = min_pollers_;
+  }
+
   for (int i = 0; i < min_pollers_; i++) {
-    MaybeCreatePoller();
-  }
-}
-
-// If the number of pollers (i.e threads currently blocked in PollForWork()) is
-// less than max threshold (i.e max_pollers_) and the total number of threads is
-// below the maximum threshold, we can let the current thread continue as poller
-bool ThreadManager::MaybeContinueAsPoller() {
-  std::unique_lock<std::mutex> lock(mu_);
-  if (shutdown_ || num_pollers_ > max_pollers_) {
-    return false;
-  }
-
-  num_pollers_++;
-  return true;
-}
-
-// Create a new poller if the current number of pollers i.e num_pollers_ (i.e
-// threads currently blocked in PollForWork()) is below the threshold (i.e
-// min_pollers_) and the total number of threads is below the maximum threshold
-void ThreadManager::MaybeCreatePoller() {
-  std::unique_lock<std::mutex> lock(mu_);
-  if (!shutdown_ && num_pollers_ < min_pollers_) {
-    num_pollers_++;
-    num_threads_++;
-
-    // Create a new thread (which ends up calling the MainWorkLoop() function
-    new WorkerThread(this);
+    WorkerThread* worker = new WorkerThread(this);
+    GPR_ASSERT(worker->created());  // Must be able to create the minimum
+    worker->Start();
   }
 }
 
 void ThreadManager::MainWorkLoop() {
-  void* tag;
-  bool ok;
-
-  /*
-   1. Poll for work (i.e PollForWork())
-   2. After returning from PollForWork, reduce the number of pollers by 1. If
-      PollForWork() returned a TIMEOUT, then it may indicate that we have more
-      polling threads than needed. Check if the number of pollers is greater
-      than min_pollers and if so, terminate the thread.
-   3. Since we are short of one poller now, see if a new poller has to be
-      created (i.e see MaybeCreatePoller() for more details)
-   4. Do the actual work (DoWork())
-   5. After doing the work, see it this thread can resume polling work (i.e
-      see MaybeContinueAsPoller() for more details) */
-  do {
+  while (true) {
+    void* tag;
+    bool ok;
     WorkStatus work_status = PollForWork(&tag, &ok);
 
-    {
-      std::unique_lock<std::mutex> lock(mu_);
-      num_pollers_--;
-
-      if (work_status == TIMEOUT && num_pollers_ > min_pollers_) {
+    grpc_core::LockableAndReleasableMutexLock lock(&mu_);
+    // Reduce the number of pollers by 1 and check what happened with the poll
+    num_pollers_--;
+    bool done = false;
+    switch (work_status) {
+      case TIMEOUT:
+        // If we timed out and we have more pollers than we need (or we are
+        // shutdown), finish this thread
+        if (shutdown_ || num_pollers_ > max_pollers_) done = true;
         break;
-      }
+      case SHUTDOWN:
+        // If the thread manager is shutdown, finish this thread
+        done = true;
+        break;
+      case WORK_FOUND:
+        // If we got work and there are now insufficient pollers and there is
+        // quota available to create a new thread, start a new poller thread
+        bool resource_exhausted = false;
+        if (!shutdown_ && num_pollers_ < min_pollers_) {
+          if (thread_quota_->Reserve(1)) {
+            // We can allocate a new poller thread
+            num_pollers_++;
+            num_threads_++;
+            if (num_threads_ > max_active_threads_sofar_) {
+              max_active_threads_sofar_ = num_threads_;
+            }
+            // Drop lock before spawning thread to avoid contention
+            lock.Release();
+            WorkerThread* worker = new WorkerThread(this);
+            if (worker->created()) {
+              worker->Start();
+            } else {
+              // Get lock again to undo changes to poller/thread counters.
+              grpc_core::MutexLock failure_lock(&mu_);
+              num_pollers_--;
+              num_threads_--;
+              resource_exhausted = true;
+              delete worker;
+            }
+          } else if (num_pollers_ > 0) {
+            // There is still at least some thread polling, so we can go on
+            // even though we are below the number of pollers that we would
+            // like to have (min_pollers_)
+            lock.Release();
+          } else {
+            // There are no pollers to spare and we couldn't allocate
+            // a new thread, so resources are exhausted!
+            lock.Release();
+            resource_exhausted = true;
+          }
+        } else {
+          // There are a sufficient number of pollers available so we can do
+          // the work and continue polling with our existing poller threads
+          lock.Release();
+        }
+        // Lock is always released at this point - do the application work
+        // or return resource exhausted if there is new work but we couldn't
+        // get a thread in which to do it.
+        DoWork(tag, ok, !resource_exhausted);
+        // Take the lock again to check post conditions
+        lock.Lock();
+        // If we're shutdown, we should finish at this point.
+        if (shutdown_) done = true;
+        break;
     }
+    // If we decided to finish the thread, break out of the while loop
+    if (done) break;
 
-    // Note that MaybeCreatePoller does check for shutdown and creates a new
-    // thread only if ThreadManager is not shutdown
-    if (work_status == WORK_FOUND) {
-      MaybeCreatePoller();
-      DoWork(tag, ok);
+    // Otherwise go back to polling as long as it doesn't exceed max_pollers_
+    //
+    // **WARNING**:
+    // There is a possibility of threads thrashing here (i.e excessive thread
+    // shutdowns and creations than the ideal case). This happens if max_poller_
+    // count is small and the rate of incoming requests is also small. In such
+    // scenarios we can possibly configure max_pollers_ to a higher value and/or
+    // increase the cq timeout.
+    //
+    // However, not doing this check here and unconditionally incrementing
+    // num_pollers (and hoping that the system will eventually settle down) has
+    // far worse consequences i.e huge number of threads getting created to the
+    // point of thread-exhaustion. For example: if the incoming request rate is
+    // very high, all the polling threads will return very quickly from
+    // PollForWork() with WORK_FOUND. They all briefly decrement num_pollers_
+    // counter thereby possibly - and briefly - making it go below min_pollers;
+    // This will most likely result in the creation of a new poller since
+    // num_pollers_ dipped below min_pollers_.
+    //
+    // Now, If we didn't do the max_poller_ check here, all these threads will
+    // go back to doing PollForWork() and the whole cycle repeats (with a new
+    // thread being added in each cycle). Once the total number of threads in
+    // the system crosses a certain threshold (around ~1500), there is heavy
+    // contention on mutexes (the mu_ here or the mutexes in gRPC core like the
+    // pollset mutex) that makes DoWork() take longer to finish thereby causing
+    // new poller threads to be created even faster. This results in a thread
+    // avalanche.
+    if (num_pollers_ < max_pollers_) {
+      num_pollers_++;
+    } else {
+      break;
     }
-  } while (MaybeContinueAsPoller());
+  };
 
+  // This thread is exiting. Do some cleanup work i.e delete already completed
+  // worker threads
   CleanupCompletedThreads();
 
   // If we are here, either ThreadManager is shutting down or it already has

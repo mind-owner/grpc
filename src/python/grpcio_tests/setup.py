@@ -1,40 +1,25 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """A setup module for the gRPC Python package."""
 
+import multiprocessing
 import os
 import os.path
 import sys
 
-import setuptools
-
 import grpc_tools.command
+import setuptools
 
 PY3 = sys.version_info.major == 3
 
@@ -45,26 +30,35 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import commands
 import grpc_version
 
-LICENSE = '3-clause BSD'
+LICENSE = 'Apache License 2.0'
 
 PACKAGE_DIRECTORIES = {
     '': '.',
 }
 
 INSTALL_REQUIRES = (
-    'coverage>=4.0', 'enum34>=1.0.4', 'futures>=2.2.0',
-    'grpcio>={version}'.format(version=grpc_version.VERSION),
+    'coverage>=4.0', 'grpcio>={version}'.format(version=grpc_version.VERSION),
+    'grpcio-channelz>={version}'.format(version=grpc_version.VERSION),
+    'grpcio-status>={version}'.format(version=grpc_version.VERSION),
     'grpcio-tools>={version}'.format(version=grpc_version.VERSION),
     'grpcio-health-checking>={version}'.format(version=grpc_version.VERSION),
-    'oauth2client>=1.4.7', 'protobuf>=3.2.0', 'six>=1.10',)
+    'oauth2client>=1.4.7', 'protobuf>=3.12.0', 'six>=1.10',
+    'google-auth>=1.17.2', 'requests>=2.14.2')
+
+if not PY3:
+    INSTALL_REQUIRES += ('futures>=2.2.0', 'enum34>=1.0.4')
 
 COMMAND_CLASS = {
     # Run `preprocess` *before* doing any packaging!
     'preprocess': commands.GatherProto,
     'build_package_protos': grpc_tools.command.BuildPackageProtos,
     'build_py': commands.BuildPy,
+    'run_fork': commands.RunFork,
     'run_interop': commands.RunInterop,
-    'test_lite': commands.TestLite
+    'test_lite': commands.TestLite,
+    'test_gevent': commands.TestGevent,
+    'test_aio': commands.TestAio,
+    'test_py3_only': commands.TestPy3Only,
 }
 
 PACKAGE_DATA = {
@@ -73,13 +67,15 @@ PACKAGE_DATA = {
         'credentials/server1.key',
         'credentials/server1.pem',
     ],
-    'tests.protoc_plugin.protos.invocation_testing': [
-        'same.proto',
-    ],
+    'tests.protoc_plugin.protos.invocation_testing': ['same.proto',],
     'tests.protoc_plugin.protos.invocation_testing.split_messages': [
         'messages.proto',
     ],
     'tests.protoc_plugin.protos.invocation_testing.split_services': [
+        'services.proto',
+    ],
+    'tests.testing.proto': [
+        'requests.proto',
         'services.proto',
     ],
     'tests.unit': [
@@ -97,16 +93,19 @@ TESTS_REQUIRE = INSTALL_REQUIRES
 
 PACKAGES = setuptools.find_packages('.')
 
-setuptools.setup(
-    name='grpcio-tests',
-    version=grpc_version.VERSION,
-    license=LICENSE,
-    packages=list(PACKAGES),
-    package_dir=PACKAGE_DIRECTORIES,
-    package_data=PACKAGE_DATA,
-    install_requires=INSTALL_REQUIRES,
-    cmdclass=COMMAND_CLASS,
-    tests_require=TESTS_REQUIRE,
-    test_suite=TEST_SUITE,
-    test_loader=TEST_LOADER,
-    test_runner=TEST_RUNNER,)
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    setuptools.setup(
+        name='grpcio-tests',
+        version=grpc_version.VERSION,
+        license=LICENSE,
+        packages=list(PACKAGES),
+        package_dir=PACKAGE_DIRECTORIES,
+        package_data=PACKAGE_DATA,
+        install_requires=INSTALL_REQUIRES,
+        cmdclass=COMMAND_CLASS,
+        tests_require=TESTS_REQUIRE,
+        test_suite=TEST_SUITE,
+        test_loader=TEST_LOADER,
+        test_runner=TEST_RUNNER,
+    )

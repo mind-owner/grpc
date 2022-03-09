@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -36,23 +21,25 @@
 #include <thread>
 #include <vector>
 
-#include <grpc++/channel.h>
-#include <grpc++/client_context.h>
-#include <grpc++/create_channel.h>
-#include <grpc++/ext/health_check_service_server_builder_option.h>
-#include <grpc++/health_check_service_interface.h>
-#include <grpc++/server.h>
-#include <grpc++/server_builder.h>
-#include <grpc++/server_context.h>
+#include <gtest/gtest.h>
+
 #include <grpc/grpc.h>
 #include <grpc/support/log.h>
-#include <gtest/gtest.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/ext/health_check_service_server_builder_option.h>
+#include <grpcpp/health_check_service_interface.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
 
 #include "src/proto/grpc/health/v1/health.grpc.pb.h"
 #include "src/proto/grpc/testing/duplicate/echo_duplicate.grpc.pb.h"
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/core/util/port.h"
 #include "test/core/util/test_config.h"
+#include "test/cpp/end2end/test_health_check_service_impl.h"
 #include "test/cpp/end2end/test_service_impl.h"
 
 using grpc::health::v1::Health;
@@ -63,39 +50,6 @@ namespace grpc {
 namespace testing {
 namespace {
 
-// A sample sync implementation of the health checking service. This does the
-// same thing as the default one.
-class HealthCheckServiceImpl : public ::grpc::health::v1::Health::Service {
- public:
-  Status Check(ServerContext* context, const HealthCheckRequest* request,
-               HealthCheckResponse* response) override {
-    std::lock_guard<std::mutex> lock(mu_);
-    auto iter = status_map_.find(request->service());
-    if (iter == status_map_.end()) {
-      return Status(StatusCode::NOT_FOUND, "");
-    }
-    response->set_status(iter->second);
-    return Status::OK;
-  }
-
-  void SetStatus(const grpc::string& service_name,
-                 HealthCheckResponse::ServingStatus status) {
-    std::lock_guard<std::mutex> lock(mu_);
-    status_map_[service_name] = status;
-  }
-
-  void SetAll(HealthCheckResponse::ServingStatus status) {
-    std::lock_guard<std::mutex> lock(mu_);
-    for (auto iter = status_map_.begin(); iter != status_map_.end(); ++iter) {
-      iter->second = status;
-    }
-  }
-
- private:
-  std::mutex mu_;
-  std::map<const grpc::string, HealthCheckResponse::ServingStatus> status_map_;
-};
-
 // A custom implementation of the health checking service interface. This is
 // used to test that it prevents the server from creating a default service and
 // also serves as an example of how to override the default service.
@@ -105,7 +59,7 @@ class CustomHealthCheckService : public HealthCheckServiceInterface {
       : impl_(impl) {
     impl_->SetStatus("", HealthCheckResponse::SERVING);
   }
-  void SetServingStatus(const grpc::string& service_name,
+  void SetServingStatus(const std::string& service_name,
                         bool serving) override {
     impl_->SetStatus(service_name, serving ? HealthCheckResponse::SERVING
                                            : HealthCheckResponse::NOT_SERVING);
@@ -116,17 +70,11 @@ class CustomHealthCheckService : public HealthCheckServiceInterface {
                           : HealthCheckResponse::NOT_SERVING);
   }
 
+  void Shutdown() override { impl_->Shutdown(); }
+
  private:
   HealthCheckServiceImpl* impl_;  // not owned
 };
-
-void LoopCompletionQueue(ServerCompletionQueue* cq) {
-  void* tag;
-  bool ok;
-  while (cq->Next(&tag, &ok)) {
-    abort();  // Nothing should come out of the cq.
-  }
-}
 
 class HealthServiceEnd2endTest : public ::testing::Test {
  protected:
@@ -176,13 +124,13 @@ class HealthServiceEnd2endTest : public ::testing::Test {
   }
 
   void ResetStubs() {
-    std::shared_ptr<Channel> channel =
-        CreateChannel(server_address_.str(), InsecureChannelCredentials());
+    std::shared_ptr<Channel> channel = grpc::CreateChannel(
+        server_address_.str(), InsecureChannelCredentials());
     hc_stub_ = grpc::health::v1::Health::NewStub(channel);
   }
 
   // When the expected_status is NOT OK, we do not care about the response.
-  void SendHealthCheckRpc(const grpc::string& service_name,
+  void SendHealthCheckRpc(const std::string& service_name,
                           const Status& expected_status) {
     EXPECT_FALSE(expected_status.ok());
     SendHealthCheckRpc(service_name, expected_status,
@@ -190,7 +138,7 @@ class HealthServiceEnd2endTest : public ::testing::Test {
   }
 
   void SendHealthCheckRpc(
-      const grpc::string& service_name, const Status& expected_status,
+      const std::string& service_name, const Status& expected_status,
       HealthCheckResponse::ServingStatus expected_serving_status) {
     HealthCheckRequest request;
     request.set_service(service_name);
@@ -206,9 +154,9 @@ class HealthServiceEnd2endTest : public ::testing::Test {
   void VerifyHealthCheckService() {
     HealthCheckServiceInterface* service = server_->GetHealthCheckService();
     EXPECT_TRUE(service != nullptr);
-    const grpc::string kHealthyService("healthy_service");
-    const grpc::string kUnhealthyService("unhealthy_service");
-    const grpc::string kNotRegisteredService("not_registered");
+    const std::string kHealthyService("healthy_service");
+    const std::string kUnhealthyService("unhealthy_service");
+    const std::string kNotRegisteredService("not_registered");
     service->SetServingStatus(kHealthyService, true);
     service->SetServingStatus(kUnhealthyService, false);
 
@@ -230,6 +178,101 @@ class HealthServiceEnd2endTest : public ::testing::Test {
                        HealthCheckResponse::NOT_SERVING);
     SendHealthCheckRpc(kNotRegisteredService,
                        Status(StatusCode::NOT_FOUND, ""));
+  }
+
+  void VerifyHealthCheckServiceStreaming() {
+    const std::string kServiceName("service_name");
+    HealthCheckServiceInterface* service = server_->GetHealthCheckService();
+    // Start Watch for service.
+    ClientContext context;
+    HealthCheckRequest request;
+    request.set_service(kServiceName);
+    std::unique_ptr<grpc::ClientReaderInterface<HealthCheckResponse>> reader =
+        hc_stub_->Watch(&context, request);
+    // Initial response will be SERVICE_UNKNOWN.
+    HealthCheckResponse response;
+    EXPECT_TRUE(reader->Read(&response));
+    EXPECT_EQ(response.SERVICE_UNKNOWN, response.status());
+    response.Clear();
+    // Now set service to NOT_SERVING and make sure we get an update.
+    service->SetServingStatus(kServiceName, false);
+    EXPECT_TRUE(reader->Read(&response));
+    EXPECT_EQ(response.NOT_SERVING, response.status());
+    response.Clear();
+    // Now set service to SERVING and make sure we get another update.
+    service->SetServingStatus(kServiceName, true);
+    EXPECT_TRUE(reader->Read(&response));
+    EXPECT_EQ(response.SERVING, response.status());
+    // Finish call.
+    context.TryCancel();
+  }
+
+  // Verify that after HealthCheckServiceInterface::Shutdown is called
+  // 1. unary client will see NOT_SERVING.
+  // 2. unary client still sees NOT_SERVING after a SetServing(true) is called.
+  // 3. streaming (Watch) client will see an update.
+  // 4. setting a new service to serving after shutdown will add the service
+  // name but return NOT_SERVING to client.
+  // This has to be called last.
+  void VerifyHealthCheckServiceShutdown() {
+    HealthCheckServiceInterface* service = server_->GetHealthCheckService();
+    EXPECT_TRUE(service != nullptr);
+    const std::string kHealthyService("healthy_service");
+    const std::string kUnhealthyService("unhealthy_service");
+    const std::string kNotRegisteredService("not_registered");
+    const std::string kNewService("add_after_shutdown");
+    service->SetServingStatus(kHealthyService, true);
+    service->SetServingStatus(kUnhealthyService, false);
+
+    ResetStubs();
+
+    // Start Watch for service.
+    ClientContext context;
+    HealthCheckRequest request;
+    request.set_service(kHealthyService);
+    std::unique_ptr<grpc::ClientReaderInterface<HealthCheckResponse>> reader =
+        hc_stub_->Watch(&context, request);
+
+    HealthCheckResponse response;
+    EXPECT_TRUE(reader->Read(&response));
+    EXPECT_EQ(response.SERVING, response.status());
+
+    SendHealthCheckRpc("", Status::OK, HealthCheckResponse::SERVING);
+    SendHealthCheckRpc(kHealthyService, Status::OK,
+                       HealthCheckResponse::SERVING);
+    SendHealthCheckRpc(kUnhealthyService, Status::OK,
+                       HealthCheckResponse::NOT_SERVING);
+    SendHealthCheckRpc(kNotRegisteredService,
+                       Status(StatusCode::NOT_FOUND, ""));
+    SendHealthCheckRpc(kNewService, Status(StatusCode::NOT_FOUND, ""));
+
+    // Shutdown health check service.
+    service->Shutdown();
+
+    // Watch client gets another update.
+    EXPECT_TRUE(reader->Read(&response));
+    EXPECT_EQ(response.NOT_SERVING, response.status());
+    // Finish Watch call.
+    context.TryCancel();
+
+    SendHealthCheckRpc("", Status::OK, HealthCheckResponse::NOT_SERVING);
+    SendHealthCheckRpc(kHealthyService, Status::OK,
+                       HealthCheckResponse::NOT_SERVING);
+    SendHealthCheckRpc(kUnhealthyService, Status::OK,
+                       HealthCheckResponse::NOT_SERVING);
+    SendHealthCheckRpc(kNotRegisteredService,
+                       Status(StatusCode::NOT_FOUND, ""));
+
+    // Setting status after Shutdown has no effect.
+    service->SetServingStatus(kHealthyService, true);
+    SendHealthCheckRpc(kHealthyService, Status::OK,
+                       HealthCheckResponse::NOT_SERVING);
+
+    // Adding serving status for a new service after shutdown will return
+    // NOT_SERVING.
+    service->SetServingStatus(kNewService, true);
+    SendHealthCheckRpc(kNewService, Status::OK,
+                       HealthCheckResponse::NOT_SERVING);
   }
 
   TestServiceImpl echo_test_service_;
@@ -259,27 +302,19 @@ TEST_F(HealthServiceEnd2endTest, DefaultHealthService) {
   EXPECT_TRUE(DefaultHealthCheckServiceEnabled());
   SetUpServer(true, false, false, nullptr);
   VerifyHealthCheckService();
+  VerifyHealthCheckServiceStreaming();
 
   // The default service has a size limit of the service name.
-  const grpc::string kTooLongServiceName(201, 'x');
+  const std::string kTooLongServiceName(201, 'x');
   SendHealthCheckRpc(kTooLongServiceName,
                      Status(StatusCode::INVALID_ARGUMENT, ""));
 }
 
-// The server has no sync service.
-TEST_F(HealthServiceEnd2endTest, DefaultHealthServiceAsyncOnly) {
+TEST_F(HealthServiceEnd2endTest, DefaultHealthServiceShutdown) {
   EnableDefaultHealthCheckService(true);
   EXPECT_TRUE(DefaultHealthCheckServiceEnabled());
-  SetUpServer(false, true, false, nullptr);
-  cq_thread_ = std::thread(LoopCompletionQueue, cq_.get());
-
-  HealthCheckServiceInterface* default_service =
-      server_->GetHealthCheckService();
-  EXPECT_TRUE(default_service == nullptr);
-
-  ResetStubs();
-
-  SendHealthCheckRpc("", Status(StatusCode::UNIMPLEMENTED, ""));
+  SetUpServer(true, false, false, nullptr);
+  VerifyHealthCheckServiceShutdown();
 }
 
 // Provide an empty service to disable the default service.
@@ -310,6 +345,22 @@ TEST_F(HealthServiceEnd2endTest, ExplicitlyOverride) {
   ResetStubs();
 
   VerifyHealthCheckService();
+  VerifyHealthCheckServiceStreaming();
+}
+
+TEST_F(HealthServiceEnd2endTest, ExplicitlyHealthServiceShutdown) {
+  EnableDefaultHealthCheckService(true);
+  EXPECT_TRUE(DefaultHealthCheckServiceEnabled());
+  std::unique_ptr<HealthCheckServiceInterface> override_service(
+      new CustomHealthCheckService(&health_check_service_impl_));
+  HealthCheckServiceInterface* underlying_service = override_service.get();
+  SetUpServer(false, false, true, std::move(override_service));
+  HealthCheckServiceInterface* service = server_->GetHealthCheckService();
+  EXPECT_TRUE(service == underlying_service);
+
+  ResetStubs();
+
+  VerifyHealthCheckServiceShutdown();
 }
 
 }  // namespace
@@ -317,7 +368,7 @@ TEST_F(HealthServiceEnd2endTest, ExplicitlyOverride) {
 }  // namespace grpc
 
 int main(int argc, char** argv) {
-  grpc_test_init(argc, argv);
+  grpc::testing::TestEnvironment env(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

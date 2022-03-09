@@ -1,39 +1,26 @@
 #region Copyright notice and license
 
-// Copyright 2015, Google Inc.
-// All rights reserved.
+// Copyright 2015 gRPC authors.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//     * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//     * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #endregion
 
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
@@ -81,8 +68,27 @@ namespace Grpc.Core.Tests
             new Metadata.Entry("0123456789abc", "XYZ");
             new Metadata.Entry("-abc", "XYZ");
             new Metadata.Entry("a_bc_", "XYZ");
+            new Metadata.Entry("abc.xyz", "XYZ");
+            new Metadata.Entry("abc.xyz-bin", new byte[] {1, 2, 3});
             Assert.Throws(typeof(ArgumentException), () => new Metadata.Entry("abc[", "xyz"));
             Assert.Throws(typeof(ArgumentException), () => new Metadata.Entry("abc/", "xyz"));
+        }
+
+        [Test]
+        public void KeysAreNormalized_UppercaseKey()
+        {
+            var uppercaseKey = "ABC";
+            var entry = new Metadata.Entry(uppercaseKey, "XYZ");
+            Assert.AreEqual("abc", entry.Key);
+        }
+
+        [Test]
+        public void KeysAreNormalized_LowercaseKey()
+        {
+            var lowercaseKey = "abc";
+            var entry = new Metadata.Entry(lowercaseKey, "XYZ");
+            // no allocation if key already lowercase
+            Assert.AreSame(lowercaseKey, entry.Key);
         }
 
         [Test]
@@ -107,25 +113,31 @@ namespace Grpc.Core.Tests
         }
 
         [Test]
-        public void Entry_CreateUnsafe_Ascii()
+        public unsafe void Entry_CreateUnsafe_Ascii()
         {
             var bytes = new byte[] { (byte)'X', (byte)'y' };
-            var entry = Metadata.Entry.CreateUnsafe("abc", bytes);
-            Assert.IsFalse(entry.IsBinary);
-            Assert.AreEqual("abc", entry.Key);
-            Assert.AreEqual("Xy", entry.Value);
-            CollectionAssert.AreEqual(bytes, entry.ValueBytes);
+            fixed (byte* ptr = bytes)
+            {
+                var entry = Metadata.Entry.CreateUnsafe("abc", new IntPtr(ptr), bytes.Length);
+                Assert.IsFalse(entry.IsBinary);
+                Assert.AreEqual("abc", entry.Key);
+                Assert.AreEqual("Xy", entry.Value);
+                CollectionAssert.AreEqual(bytes, entry.ValueBytes);
+            }
         }
 
         [Test]
-        public void Entry_CreateUnsafe_Binary()
+        public unsafe void Entry_CreateUnsafe_Binary()
         {
             var bytes = new byte[] { 1, 2, 3 };
-            var entry = Metadata.Entry.CreateUnsafe("abc-bin", bytes);
-            Assert.IsTrue(entry.IsBinary);
-            Assert.AreEqual("abc-bin", entry.Key);
-            Assert.Throws(typeof(InvalidOperationException), () => { var v = entry.Value; });
-            CollectionAssert.AreEqual(bytes, entry.ValueBytes);
+            fixed (byte* ptr = bytes)
+            {
+                var entry = Metadata.Entry.CreateUnsafe("abc-bin", new IntPtr(ptr), bytes.Length);
+                Assert.IsTrue(entry.IsBinary);
+                Assert.AreEqual("abc-bin", entry.Key);
+                Assert.Throws(typeof(InvalidOperationException), () => { var v = entry.Value; });
+                CollectionAssert.AreEqual(bytes, entry.ValueBytes);
+            }
         }
 
         [Test]
@@ -230,6 +242,124 @@ namespace Grpc.Core.Tests
             Assert.Throws<InvalidOperationException>(() => metadata.Add("new-key-bin", new byte[] { 0xaa }));
             Assert.Throws<InvalidOperationException>(() => metadata.Clear());
             Assert.Throws<InvalidOperationException>(() => metadata.Remove(metadata[0]));
+        }
+
+        [Test]
+        public void GetAll()
+        {
+            var metadata = new Metadata
+            {
+                { "abc", "abc-value1" },
+                { "abc", "abc-value2" },
+                { "xyz", "xyz-value1" },
+            };
+
+            var abcEntries = metadata.GetAll("abc").ToList();
+            Assert.AreEqual(2, abcEntries.Count);
+            Assert.AreEqual("abc-value1", abcEntries[0].Value);
+            Assert.AreEqual("abc-value2", abcEntries[1].Value);
+
+            var xyzEntries = metadata.GetAll("xyz").ToList();
+            Assert.AreEqual(1, xyzEntries.Count);
+            Assert.AreEqual("xyz-value1", xyzEntries[0].Value);
+
+            var xyzUppercaseEntries = metadata.GetAll("XYZ").ToList();
+            Assert.AreEqual(1, xyzUppercaseEntries.Count);
+            Assert.AreEqual("xyz-value1", xyzUppercaseEntries[0].Value);
+        }
+
+        [Test]
+        public void Get()
+        {
+            var metadata = new Metadata
+            {
+                { "abc", "abc-value1" },
+                { "abc", "abc-value2" },
+                { "xyz", "xyz-value1" },
+            };
+
+            var abcEntry = metadata.Get("abc");
+            Assert.AreEqual("abc-value2", abcEntry.Value);
+
+            var xyzEntry = metadata.Get("xyz");
+            Assert.AreEqual("xyz-value1", xyzEntry.Value);
+
+            var abcUppercaseEntry = metadata.Get("AbC");
+            Assert.AreEqual("abc-value2", abcUppercaseEntry.Value);
+
+            var notFound = metadata.Get("not-found");
+            Assert.AreEqual(null, notFound);
+
+        }
+
+        [Test]
+        public void GetValue()
+        {
+            var metadata = new Metadata
+            {
+                { "abc", "abc-value1" },
+                { "abc", "abc-value2" },
+                { "xyz", "xyz-value1" },
+                { "xyz-bin", Encoding.ASCII.GetBytes("xyz-value1") },
+            };
+
+            var abcValue = metadata.GetValue("abc");
+            Assert.AreEqual("abc-value2", abcValue);
+
+            var xyzValue = metadata.GetValue("xyz");
+            Assert.AreEqual("xyz-value1", xyzValue);
+
+            var abcUppercaseValue = metadata.GetValue("ABC");
+            Assert.AreEqual("abc-value2", abcUppercaseValue);
+
+            var notFound = metadata.GetValue("not-found");
+            Assert.AreEqual(null, notFound);
+        }
+
+        [Test]
+        public void GetValue_BytesValue()
+        {
+            var metadata = new Metadata
+            {
+                { "xyz-bin", Encoding.ASCII.GetBytes("xyz-value1") },
+            };
+
+            Assert.Throws<InvalidOperationException>(() => metadata.GetValue("xyz-bin"));
+        }
+
+        [Test]
+        public void GetValueBytes()
+        {
+            var metadata = new Metadata
+            {
+                { "abc-bin", Encoding.ASCII.GetBytes("abc-value1") },
+                { "abc-bin", Encoding.ASCII.GetBytes("abc-value2") },
+                { "xyz-bin", Encoding.ASCII.GetBytes("xyz-value1") },
+            };
+
+            var abcValue = metadata.GetValueBytes("abc-bin");
+            Assert.AreEqual(Encoding.ASCII.GetBytes("abc-value2"), abcValue);
+
+            var xyzValue = metadata.GetValueBytes("xyz-bin");
+            Assert.AreEqual(Encoding.ASCII.GetBytes("xyz-value1"), xyzValue);
+
+            var xyzUppercaseValue = metadata.GetValueBytes("XYZ-BIN");
+            Assert.AreEqual(Encoding.ASCII.GetBytes("xyz-value1"), xyzUppercaseValue);
+
+            var notFound = metadata.GetValueBytes("not-found");
+            Assert.AreEqual(null, notFound);
+        }
+
+        [Test]
+        public void GetValueBytes_StringValue()
+        {
+            var metadata = new Metadata
+            {
+                { "xyz", "xyz-value1" },
+            };
+
+            var xyzValue = metadata.GetValueBytes("xyz");
+            Assert.AreEqual(Encoding.ASCII.GetBytes("xyz-value1"), xyzValue);
         }
 
         private Metadata CreateMetadata()

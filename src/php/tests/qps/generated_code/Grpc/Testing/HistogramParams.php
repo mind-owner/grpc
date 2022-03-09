@@ -9,42 +9,47 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * Histogram params based on grpc/support/histogram.c
- * </pre>
  *
- * Protobuf type <code>grpc.testing.HistogramParams</code>
+ * Generated from protobuf message <code>grpc.testing.HistogramParams</code>
  */
 class HistogramParams extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <pre>
      * first bucket is [0, 1 + resolution)
-     * </pre>
      *
-     * <code>double resolution = 1;</code>
+     * Generated from protobuf field <code>double resolution = 1;</code>
      */
-    private $resolution = 0.0;
+    protected $resolution = 0.0;
     /**
-     * <pre>
      * use enough buckets to allow this value
-     * </pre>
      *
-     * <code>double max_possible = 2;</code>
+     * Generated from protobuf field <code>double max_possible = 2;</code>
      */
-    private $max_possible = 0.0;
+    protected $max_possible = 0.0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type float $resolution
+     *           first bucket is [0, 1 + resolution)
+     *     @type float $max_possible
+     *           use enough buckets to allow this value
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Stats::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <pre>
      * first bucket is [0, 1 + resolution)
-     * </pre>
      *
-     * <code>double resolution = 1;</code>
+     * Generated from protobuf field <code>double resolution = 1;</code>
+     * @return float
      */
     public function getResolution()
     {
@@ -52,24 +57,25 @@ class HistogramParams extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * first bucket is [0, 1 + resolution)
-     * </pre>
      *
-     * <code>double resolution = 1;</code>
+     * Generated from protobuf field <code>double resolution = 1;</code>
+     * @param float $var
+     * @return $this
      */
     public function setResolution($var)
     {
         GPBUtil::checkDouble($var);
         $this->resolution = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * use enough buckets to allow this value
-     * </pre>
      *
-     * <code>double max_possible = 2;</code>
+     * Generated from protobuf field <code>double max_possible = 2;</code>
+     * @return float
      */
     public function getMaxPossible()
     {
@@ -77,16 +83,18 @@ class HistogramParams extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * use enough buckets to allow this value
-     * </pre>
      *
-     * <code>double max_possible = 2;</code>
+     * Generated from protobuf field <code>double max_possible = 2;</code>
+     * @param float $var
+     * @return $this
      */
     public function setMaxPossible($var)
     {
         GPBUtil::checkDouble($var);
         $this->max_possible = $var;
+
+        return $this;
     }
 
 }

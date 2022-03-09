@@ -9,85 +9,120 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>grpc.testing.ServerConfig</code>
+ * Generated from protobuf message <code>grpc.testing.ServerConfig</code>
  */
 class ServerConfig extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <code>.grpc.testing.ServerType server_type = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerType server_type = 1;</code>
      */
-    private $server_type = 0;
+    protected $server_type = 0;
     /**
-     * <code>.grpc.testing.SecurityParams security_params = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.SecurityParams security_params = 2;</code>
      */
-    private $security_params = null;
+    protected $security_params = null;
     /**
-     * <pre>
      * Port on which to listen. Zero means pick unused port.
-     * </pre>
      *
-     * <code>int32 port = 4;</code>
+     * Generated from protobuf field <code>int32 port = 4;</code>
      */
-    private $port = 0;
+    protected $port = 0;
     /**
-     * <pre>
      * Only for async server. Number of threads used to serve the requests.
-     * </pre>
      *
-     * <code>int32 async_server_threads = 7;</code>
+     * Generated from protobuf field <code>int32 async_server_threads = 7;</code>
      */
-    private $async_server_threads = 0;
+    protected $async_server_threads = 0;
     /**
-     * <pre>
      * Specify the number of cores to limit server to, if desired
-     * </pre>
      *
-     * <code>int32 core_limit = 8;</code>
+     * Generated from protobuf field <code>int32 core_limit = 8;</code>
      */
-    private $core_limit = 0;
+    protected $core_limit = 0;
     /**
-     * <pre>
      * payload config, used in generic server.
      * Note this must NOT be used in proto (non-generic) servers. For proto servers,
      * 'response sizes' must be configured from the 'response_size' field of the
      * 'SimpleRequest' objects in RPC requests.
-     * </pre>
      *
-     * <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
+     * Generated from protobuf field <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
      */
-    private $payload_config = null;
+    protected $payload_config = null;
     /**
-     * <pre>
      * Specify the cores we should run the server on, if desired
-     * </pre>
      *
-     * <code>repeated int32 core_list = 10;</code>
+     * Generated from protobuf field <code>repeated int32 core_list = 10;</code>
      */
     private $core_list;
     /**
-     * <pre>
      * If we use an OTHER_SERVER client_type, this string gives more detail
-     * </pre>
      *
-     * <code>string other_server_api = 11;</code>
+     * Generated from protobuf field <code>string other_server_api = 11;</code>
      */
-    private $other_server_api = '';
+    protected $other_server_api = '';
     /**
-     * <pre>
-     * Buffer pool size (no buffer pool specified if unset)
-     * </pre>
+     * Number of threads that share each completion queue
      *
-     * <code>int32 resource_quota_size = 1001;</code>
+     * Generated from protobuf field <code>int32 threads_per_cq = 12;</code>
      */
-    private $resource_quota_size = 0;
+    protected $threads_per_cq = 0;
+    /**
+     * Buffer pool size (no buffer pool specified if unset)
+     *
+     * Generated from protobuf field <code>int32 resource_quota_size = 1001;</code>
+     */
+    protected $resource_quota_size = 0;
+    /**
+     * Generated from protobuf field <code>repeated .grpc.testing.ChannelArg channel_args = 1002;</code>
+     */
+    private $channel_args;
+    /**
+     * Number of server processes. 0 indicates no restriction.
+     *
+     * Generated from protobuf field <code>int32 server_processes = 21;</code>
+     */
+    protected $server_processes = 0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type int $server_type
+     *     @type \Grpc\Testing\SecurityParams $security_params
+     *     @type int $port
+     *           Port on which to listen. Zero means pick unused port.
+     *     @type int $async_server_threads
+     *           Only for async server. Number of threads used to serve the requests.
+     *     @type int $core_limit
+     *           Specify the number of cores to limit server to, if desired
+     *     @type \Grpc\Testing\PayloadConfig $payload_config
+     *           payload config, used in generic server.
+     *           Note this must NOT be used in proto (non-generic) servers. For proto servers,
+     *           'response sizes' must be configured from the 'response_size' field of the
+     *           'SimpleRequest' objects in RPC requests.
+     *     @type int[]|\Google\Protobuf\Internal\RepeatedField $core_list
+     *           Specify the cores we should run the server on, if desired
+     *     @type string $other_server_api
+     *           If we use an OTHER_SERVER client_type, this string gives more detail
+     *     @type int $threads_per_cq
+     *           Number of threads that share each completion queue
+     *     @type int $resource_quota_size
+     *           Buffer pool size (no buffer pool specified if unset)
+     *     @type \Grpc\Testing\ChannelArg[]|\Google\Protobuf\Internal\RepeatedField $channel_args
+     *     @type int $server_processes
+     *           Number of server processes. 0 indicates no restriction.
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <code>.grpc.testing.ServerType server_type = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerType server_type = 1;</code>
+     * @return int
      */
     public function getServerType()
     {
@@ -95,16 +130,21 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>.grpc.testing.ServerType server_type = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerType server_type = 1;</code>
+     * @param int $var
+     * @return $this
      */
     public function setServerType($var)
     {
         GPBUtil::checkEnum($var, \Grpc\Testing\ServerType::class);
         $this->server_type = $var;
+
+        return $this;
     }
 
     /**
-     * <code>.grpc.testing.SecurityParams security_params = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.SecurityParams security_params = 2;</code>
+     * @return \Grpc\Testing\SecurityParams
      */
     public function getSecurityParams()
     {
@@ -112,20 +152,23 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>.grpc.testing.SecurityParams security_params = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.SecurityParams security_params = 2;</code>
+     * @param \Grpc\Testing\SecurityParams $var
+     * @return $this
      */
-    public function setSecurityParams(&$var)
+    public function setSecurityParams($var)
     {
         GPBUtil::checkMessage($var, \Grpc\Testing\SecurityParams::class);
         $this->security_params = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Port on which to listen. Zero means pick unused port.
-     * </pre>
      *
-     * <code>int32 port = 4;</code>
+     * Generated from protobuf field <code>int32 port = 4;</code>
+     * @return int
      */
     public function getPort()
     {
@@ -133,24 +176,25 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Port on which to listen. Zero means pick unused port.
-     * </pre>
      *
-     * <code>int32 port = 4;</code>
+     * Generated from protobuf field <code>int32 port = 4;</code>
+     * @param int $var
+     * @return $this
      */
     public function setPort($var)
     {
         GPBUtil::checkInt32($var);
         $this->port = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Only for async server. Number of threads used to serve the requests.
-     * </pre>
      *
-     * <code>int32 async_server_threads = 7;</code>
+     * Generated from protobuf field <code>int32 async_server_threads = 7;</code>
+     * @return int
      */
     public function getAsyncServerThreads()
     {
@@ -158,24 +202,25 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Only for async server. Number of threads used to serve the requests.
-     * </pre>
      *
-     * <code>int32 async_server_threads = 7;</code>
+     * Generated from protobuf field <code>int32 async_server_threads = 7;</code>
+     * @param int $var
+     * @return $this
      */
     public function setAsyncServerThreads($var)
     {
         GPBUtil::checkInt32($var);
         $this->async_server_threads = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Specify the number of cores to limit server to, if desired
-     * </pre>
      *
-     * <code>int32 core_limit = 8;</code>
+     * Generated from protobuf field <code>int32 core_limit = 8;</code>
+     * @return int
      */
     public function getCoreLimit()
     {
@@ -183,27 +228,28 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Specify the number of cores to limit server to, if desired
-     * </pre>
      *
-     * <code>int32 core_limit = 8;</code>
+     * Generated from protobuf field <code>int32 core_limit = 8;</code>
+     * @param int $var
+     * @return $this
      */
     public function setCoreLimit($var)
     {
         GPBUtil::checkInt32($var);
         $this->core_limit = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * payload config, used in generic server.
      * Note this must NOT be used in proto (non-generic) servers. For proto servers,
      * 'response sizes' must be configured from the 'response_size' field of the
      * 'SimpleRequest' objects in RPC requests.
-     * </pre>
      *
-     * <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
+     * Generated from protobuf field <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
+     * @return \Grpc\Testing\PayloadConfig
      */
     public function getPayloadConfig()
     {
@@ -211,27 +257,28 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * payload config, used in generic server.
      * Note this must NOT be used in proto (non-generic) servers. For proto servers,
      * 'response sizes' must be configured from the 'response_size' field of the
      * 'SimpleRequest' objects in RPC requests.
-     * </pre>
      *
-     * <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
+     * Generated from protobuf field <code>.grpc.testing.PayloadConfig payload_config = 9;</code>
+     * @param \Grpc\Testing\PayloadConfig $var
+     * @return $this
      */
-    public function setPayloadConfig(&$var)
+    public function setPayloadConfig($var)
     {
         GPBUtil::checkMessage($var, \Grpc\Testing\PayloadConfig::class);
         $this->payload_config = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Specify the cores we should run the server on, if desired
-     * </pre>
      *
-     * <code>repeated int32 core_list = 10;</code>
+     * Generated from protobuf field <code>repeated int32 core_list = 10;</code>
+     * @return \Google\Protobuf\Internal\RepeatedField
      */
     public function getCoreList()
     {
@@ -239,24 +286,25 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Specify the cores we should run the server on, if desired
-     * </pre>
      *
-     * <code>repeated int32 core_list = 10;</code>
+     * Generated from protobuf field <code>repeated int32 core_list = 10;</code>
+     * @param int[]|\Google\Protobuf\Internal\RepeatedField $var
+     * @return $this
      */
-    public function setCoreList(&$var)
+    public function setCoreList($var)
     {
-        GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::INT32);
-        $this->core_list = $var;
+        $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::INT32);
+        $this->core_list = $arr;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * If we use an OTHER_SERVER client_type, this string gives more detail
-     * </pre>
      *
-     * <code>string other_server_api = 11;</code>
+     * Generated from protobuf field <code>string other_server_api = 11;</code>
+     * @return string
      */
     public function getOtherServerApi()
     {
@@ -264,24 +312,51 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * If we use an OTHER_SERVER client_type, this string gives more detail
-     * </pre>
      *
-     * <code>string other_server_api = 11;</code>
+     * Generated from protobuf field <code>string other_server_api = 11;</code>
+     * @param string $var
+     * @return $this
      */
     public function setOtherServerApi($var)
     {
         GPBUtil::checkString($var, True);
         $this->other_server_api = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
-     * Buffer pool size (no buffer pool specified if unset)
-     * </pre>
+     * Number of threads that share each completion queue
      *
-     * <code>int32 resource_quota_size = 1001;</code>
+     * Generated from protobuf field <code>int32 threads_per_cq = 12;</code>
+     * @return int
+     */
+    public function getThreadsPerCq()
+    {
+        return $this->threads_per_cq;
+    }
+
+    /**
+     * Number of threads that share each completion queue
+     *
+     * Generated from protobuf field <code>int32 threads_per_cq = 12;</code>
+     * @param int $var
+     * @return $this
+     */
+    public function setThreadsPerCq($var)
+    {
+        GPBUtil::checkInt32($var);
+        $this->threads_per_cq = $var;
+
+        return $this;
+    }
+
+    /**
+     * Buffer pool size (no buffer pool specified if unset)
+     *
+     * Generated from protobuf field <code>int32 resource_quota_size = 1001;</code>
+     * @return int
      */
     public function getResourceQuotaSize()
     {
@@ -289,16 +364,66 @@ class ServerConfig extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Buffer pool size (no buffer pool specified if unset)
-     * </pre>
      *
-     * <code>int32 resource_quota_size = 1001;</code>
+     * Generated from protobuf field <code>int32 resource_quota_size = 1001;</code>
+     * @param int $var
+     * @return $this
      */
     public function setResourceQuotaSize($var)
     {
         GPBUtil::checkInt32($var);
         $this->resource_quota_size = $var;
+
+        return $this;
+    }
+
+    /**
+     * Generated from protobuf field <code>repeated .grpc.testing.ChannelArg channel_args = 1002;</code>
+     * @return \Google\Protobuf\Internal\RepeatedField
+     */
+    public function getChannelArgs()
+    {
+        return $this->channel_args;
+    }
+
+    /**
+     * Generated from protobuf field <code>repeated .grpc.testing.ChannelArg channel_args = 1002;</code>
+     * @param \Grpc\Testing\ChannelArg[]|\Google\Protobuf\Internal\RepeatedField $var
+     * @return $this
+     */
+    public function setChannelArgs($var)
+    {
+        $arr = GPBUtil::checkRepeatedField($var, \Google\Protobuf\Internal\GPBType::MESSAGE, \Grpc\Testing\ChannelArg::class);
+        $this->channel_args = $arr;
+
+        return $this;
+    }
+
+    /**
+     * Number of server processes. 0 indicates no restriction.
+     *
+     * Generated from protobuf field <code>int32 server_processes = 21;</code>
+     * @return int
+     */
+    public function getServerProcesses()
+    {
+        return $this->server_processes;
+    }
+
+    /**
+     * Number of server processes. 0 indicates no restriction.
+     *
+     * Generated from protobuf field <code>int32 server_processes = 21;</code>
+     * @param int $var
+     * @return $this
+     */
+    public function setServerProcesses($var)
+    {
+        GPBUtil::checkInt32($var);
+        $this->server_processes = $var;
+
+        return $this;
     }
 
 }

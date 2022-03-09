@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -41,8 +26,8 @@
 namespace grpc {
 namespace testing {
 
-grpc::string DescribeServiceList(std::vector<grpc::string> service_list,
-                                 grpc::protobuf::DescriptorPool& desc_pool) {
+std::string DescribeServiceList(std::vector<std::string> service_list,
+                                grpc::protobuf::DescriptorPool& desc_pool) {
   std::stringstream result;
   for (auto it = service_list.begin(); it != service_list.end(); it++) {
     auto const& service = *it;
@@ -55,16 +40,16 @@ grpc::string DescribeServiceList(std::vector<grpc::string> service_list,
   return result.str();
 }
 
-grpc::string DescribeService(const grpc::protobuf::ServiceDescriptor* service) {
-  grpc::string result;
+std::string DescribeService(const grpc::protobuf::ServiceDescriptor* service) {
+  std::string result;
   if (service->options().deprecated()) {
     result.append("DEPRECATED\n");
   }
   result.append("filename: " + service->file()->name() + "\n");
 
-  grpc::string package = service->full_name();
+  std::string package = service->full_name();
   size_t pos = package.rfind("." + service->name());
-  if (pos != grpc::string::npos) {
+  if (pos != std::string::npos) {
     package.erase(pos);
     result.append("package: " + package + ";\n");
   }
@@ -76,7 +61,7 @@ grpc::string DescribeService(const grpc::protobuf::ServiceDescriptor* service) {
   return result;
 }
 
-grpc::string DescribeMethod(const grpc::protobuf::MethodDescriptor* method) {
+std::string DescribeMethod(const grpc::protobuf::MethodDescriptor* method) {
   std::stringstream result;
   result << "  rpc " << method->name()
          << (method->client_streaming() ? "(stream " : "(")
@@ -89,17 +74,16 @@ grpc::string DescribeMethod(const grpc::protobuf::MethodDescriptor* method) {
   return result.str();
 }
 
-grpc::string SummarizeService(
-    const grpc::protobuf::ServiceDescriptor* service) {
-  grpc::string result;
+std::string SummarizeService(const grpc::protobuf::ServiceDescriptor* service) {
+  std::string result;
   for (int i = 0; i < service->method_count(); ++i) {
     result.append(SummarizeMethod(service->method(i)));
   }
   return result;
 }
 
-grpc::string SummarizeMethod(const grpc::protobuf::MethodDescriptor* method) {
-  grpc::string result = method->name();
+std::string SummarizeMethod(const grpc::protobuf::MethodDescriptor* method) {
+  std::string result = method->name();
   result.append("\n");
   return result;
 }

@@ -1,64 +1,104 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #ifndef GRPC_CORE_LIB_SLICE_SLICE_INTERNAL_H
 #define GRPC_CORE_LIB_SLICE_SLICE_INTERNAL_H
 
+#include <grpc/support/port_platform.h>
+
+#include <string.h>
+
+#include "absl/strings/string_view.h"
+
 #include <grpc/slice.h>
 #include <grpc/slice_buffer.h>
+#include <grpc/support/log.h>
 
-#include "src/core/lib/iomgr/exec_ctx.h"
+#include "src/core/lib/gpr/murmur_hash.h"
+#include "src/core/lib/gprpp/memory.h"
+#include "src/core/lib/gprpp/ref_counted.h"
+#include "src/core/lib/slice/slice_refcount.h"
 
-grpc_slice grpc_slice_ref_internal(grpc_slice slice);
-void grpc_slice_unref_internal(grpc_exec_ctx *exec_ctx, grpc_slice slice);
-void grpc_slice_buffer_reset_and_unref_internal(grpc_exec_ctx *exec_ctx,
-                                                grpc_slice_buffer *sb);
-void grpc_slice_buffer_destroy_internal(grpc_exec_ctx *exec_ctx,
-                                        grpc_slice_buffer *sb);
+void grpc_slice_buffer_reset_and_unref_internal(grpc_slice_buffer* sb);
+void grpc_slice_buffer_partial_unref_internal(grpc_slice_buffer* sb,
+                                              size_t idx);
+void grpc_slice_buffer_destroy_internal(grpc_slice_buffer* sb);
 
-/* Check if a slice is interned */
-bool grpc_slice_is_interned(grpc_slice slice);
+// Returns a pointer to the first slice in the slice buffer without giving
+// ownership to or a reference count on that slice.
+inline grpc_slice* grpc_slice_buffer_peek_first(grpc_slice_buffer* sb) {
+  GPR_DEBUG_ASSERT(sb->count > 0);
+  return &sb->slices[0];
+}
 
-void grpc_slice_intern_init(void);
-void grpc_slice_intern_shutdown(void);
-void grpc_test_only_set_slice_hash_seed(uint32_t key);
+// Removes the first slice from the slice buffer.
+void grpc_slice_buffer_remove_first(grpc_slice_buffer* sb);
+
+// Calls grpc_slice_sub with the given parameters on the first slice.
+void grpc_slice_buffer_sub_first(grpc_slice_buffer* sb, size_t begin,
+                                 size_t end);
+
+void grpc_test_only_set_slice_hash_seed(uint32_t seed);
 // if slice matches a static slice, returns the static slice
 // otherwise returns the passed in slice (without reffing it)
 // used for surface boundaries where we might receive an un-interned static
 // string
 grpc_slice grpc_slice_maybe_static_intern(grpc_slice slice,
-                                          bool *returned_slice_is_different);
+                                          bool* returned_slice_is_different);
 uint32_t grpc_static_slice_hash(grpc_slice s);
 int grpc_static_slice_eq(grpc_slice a, grpc_slice b);
+
+inline uint32_t grpc_slice_hash_internal(const grpc_slice& s) {
+  return gpr_murmur_hash3(GRPC_SLICE_START_PTR(s), GRPC_SLICE_LENGTH(s),
+                          grpc_core::g_hash_seed);
+}
+
+grpc_slice grpc_slice_from_moved_buffer(grpc_core::UniquePtr<char> p,
+                                        size_t len);
+grpc_slice grpc_slice_from_moved_string(grpc_core::UniquePtr<char> p);
+grpc_slice grpc_slice_from_cpp_string(std::string str);
+
+// Returns the memory used by this slice, not counting the slice structure
+// itself. This means that inlined and slices from static strings will return
+// 0. All other slices will return the size of the allocated chars.
+size_t grpc_slice_memory_usage(grpc_slice s);
+
+namespace grpc_core {
+
+struct SliceHash {
+  std::size_t operator()(const grpc_slice& slice) const {
+    return grpc_slice_hash_internal(slice);
+  }
+};
+
+extern uint32_t g_hash_seed;
+
+// Converts grpc_slice to absl::string_view.
+inline absl::string_view StringViewFromSlice(const grpc_slice& slice) {
+  return absl::string_view(
+      reinterpret_cast<const char*>(GRPC_SLICE_START_PTR(slice)),
+      GRPC_SLICE_LENGTH(slice));
+}
+
+}  // namespace grpc_core
+
+inline bool operator==(const grpc_slice& s1, const grpc_slice& s2) {
+  return grpc_slice_eq(s1, s2);
+}
 
 #endif /* GRPC_CORE_LIB_SLICE_SLICE_INTERNAL_H */

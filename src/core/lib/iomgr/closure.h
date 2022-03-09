@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -36,51 +21,46 @@
 
 #include <grpc/support/port_platform.h>
 
-#include <grpc/impl/codegen/exec_ctx_fwd.h>
+#include <assert.h>
 #include <stdbool.h>
+
+#include <grpc/support/alloc.h>
+#include <grpc/support/log.h>
+
+#include "src/core/lib/gprpp/debug_location.h"
+#include "src/core/lib/gprpp/manual_constructor.h"
+#include "src/core/lib/gprpp/mpscq.h"
 #include "src/core/lib/iomgr/error.h"
-#include "src/core/lib/support/mpscq.h"
+#include "src/core/lib/profiling/timers.h"
 
 struct grpc_closure;
 typedef struct grpc_closure grpc_closure;
 
+extern grpc_core::DebugOnlyTraceFlag grpc_trace_closure;
+
 typedef struct grpc_closure_list {
-  grpc_closure *head;
-  grpc_closure *tail;
+  grpc_closure* head;
+  grpc_closure* tail;
 } grpc_closure_list;
 
 /** gRPC Callback definition.
  *
  * \param arg Arbitrary input.
  * \param error GRPC_ERROR_NONE if no error occurred, otherwise some grpc_error
- *              describing what went wrong */
-typedef void (*grpc_iomgr_cb_func)(grpc_exec_ctx *exec_ctx, void *arg,
-                                   grpc_error *error);
-
-typedef struct grpc_closure_scheduler grpc_closure_scheduler;
-
-typedef struct grpc_closure_scheduler_vtable {
-  /* NOTE: for all these functions, closure->scheduler == the scheduler that was
-           used to find this vtable */
-  void (*run)(grpc_exec_ctx *exec_ctx, grpc_closure *closure,
-              grpc_error *error);
-  void (*sched)(grpc_exec_ctx *exec_ctx, grpc_closure *closure,
-                grpc_error *error);
-  const char *name;
-} grpc_closure_scheduler_vtable;
-
-/** Abstract type that can schedule closures for execution */
-struct grpc_closure_scheduler {
-  const grpc_closure_scheduler_vtable *vtable;
-};
+ *              describing what went wrong.
+ *              Error contract: it is not the cb's job to unref this error;
+ *              the closure scheduler will do that after the cb returns */
+typedef void (*grpc_iomgr_cb_func)(void* arg, grpc_error_handle error);
 
 /** A closure over a grpc_iomgr_cb_func. */
 struct grpc_closure {
   /** Once queued, next indicates the next queued closure; before then, scratch
    *  space */
   union {
-    grpc_closure *next;
-    gpr_mpscq_node atm_next;
+    grpc_closure* next;
+    grpc_core::ManualConstructor<
+        grpc_core::MultiProducerSingleConsumerQueue::Node>
+        mpscq_node;
     uintptr_t scratch;
   } next_data;
 
@@ -88,66 +68,209 @@ struct grpc_closure {
   grpc_iomgr_cb_func cb;
 
   /** Arguments to be passed to "cb". */
-  void *cb_arg;
-
-  /** Scheduler to schedule against: NULL to schedule against current execution
-      context */
-  grpc_closure_scheduler *scheduler;
+  void* cb_arg;
 
   /** Once queued, the result of the closure. Before then: scratch space */
   union {
-    grpc_error *error;
+    uintptr_t error;
     uintptr_t scratch;
   } error_data;
 
+// extra tracing and debugging for grpc_closure. This incurs a decent amount of
+// overhead per closure, so it must be enabled at compile time.
 #ifndef NDEBUG
   bool scheduled;
+  bool run;  // true = run, false = scheduled
+  const char* file_created;
+  int line_created;
+  const char* file_initiated;
+  int line_initiated;
 #endif
 };
 
+#ifndef NDEBUG
+inline grpc_closure* grpc_closure_init(const char* file, int line,
+                                       grpc_closure* closure,
+                                       grpc_iomgr_cb_func cb, void* cb_arg) {
+#else
+inline grpc_closure* grpc_closure_init(grpc_closure* closure,
+                                       grpc_iomgr_cb_func cb, void* cb_arg) {
+#endif
+  closure->cb = cb;
+  closure->cb_arg = cb_arg;
+  closure->error_data.error = 0;
+#ifndef NDEBUG
+  closure->scheduled = false;
+  closure->file_initiated = nullptr;
+  closure->line_initiated = 0;
+  closure->run = false;
+  closure->file_created = file;
+  closure->line_created = line;
+#endif
+  return closure;
+}
+
 /** Initializes \a closure with \a cb and \a cb_arg. Returns \a closure. */
-grpc_closure *grpc_closure_init(grpc_closure *closure, grpc_iomgr_cb_func cb,
-                                void *cb_arg,
-                                grpc_closure_scheduler *scheduler);
+#ifndef NDEBUG
+#define GRPC_CLOSURE_INIT(closure, cb, cb_arg, scheduler) \
+  grpc_closure_init(__FILE__, __LINE__, closure, cb, cb_arg)
+#else
+#define GRPC_CLOSURE_INIT(closure, cb, cb_arg, scheduler) \
+  grpc_closure_init(closure, cb, cb_arg)
+#endif
+
+namespace closure_impl {
+
+struct wrapped_closure {
+  grpc_iomgr_cb_func cb;
+  void* cb_arg;
+  grpc_closure wrapper;
+};
+inline void closure_wrapper(void* arg, grpc_error_handle error) {
+  wrapped_closure* wc = static_cast<wrapped_closure*>(arg);
+  grpc_iomgr_cb_func cb = wc->cb;
+  void* cb_arg = wc->cb_arg;
+  gpr_free(wc);
+  cb(cb_arg, error);
+}
+
+}  // namespace closure_impl
+
+#ifndef NDEBUG
+inline grpc_closure* grpc_closure_create(const char* file, int line,
+                                         grpc_iomgr_cb_func cb, void* cb_arg) {
+#else
+inline grpc_closure* grpc_closure_create(grpc_iomgr_cb_func cb, void* cb_arg) {
+#endif
+  closure_impl::wrapped_closure* wc =
+      static_cast<closure_impl::wrapped_closure*>(gpr_malloc(sizeof(*wc)));
+  wc->cb = cb;
+  wc->cb_arg = cb_arg;
+#ifndef NDEBUG
+  grpc_closure_init(file, line, &wc->wrapper, closure_impl::closure_wrapper,
+                    wc);
+#else
+  grpc_closure_init(&wc->wrapper, closure_impl::closure_wrapper, wc);
+#endif
+  return &wc->wrapper;
+}
 
 /* Create a heap allocated closure: try to avoid except for very rare events */
-grpc_closure *grpc_closure_create(grpc_iomgr_cb_func cb, void *cb_arg,
-                                  grpc_closure_scheduler *scheduler);
+#ifndef NDEBUG
+#define GRPC_CLOSURE_CREATE(cb, cb_arg, scheduler) \
+  grpc_closure_create(__FILE__, __LINE__, cb, cb_arg)
+#else
+#define GRPC_CLOSURE_CREATE(cb, cb_arg, scheduler) \
+  grpc_closure_create(cb, cb_arg)
+#endif
 
 #define GRPC_CLOSURE_LIST_INIT \
-  { NULL, NULL }
+  { nullptr, nullptr }
 
-void grpc_closure_list_init(grpc_closure_list *list);
+inline void grpc_closure_list_init(grpc_closure_list* closure_list) {
+  closure_list->head = closure_list->tail = nullptr;
+}
+
+/** add \a closure to the end of \a list
+    Returns true if \a list becomes non-empty */
+inline bool grpc_closure_list_append(grpc_closure_list* closure_list,
+                                     grpc_closure* closure) {
+  if (closure == nullptr) {
+    return false;
+  }
+  closure->next_data.next = nullptr;
+  bool was_empty = (closure_list->head == nullptr);
+  if (was_empty) {
+    closure_list->head = closure;
+  } else {
+    closure_list->tail->next_data.next = closure;
+  }
+  closure_list->tail = closure;
+  return was_empty;
+}
 
 /** add \a closure to the end of \a list
     and set \a closure's result to \a error
     Returns true if \a list becomes non-empty */
-bool grpc_closure_list_append(grpc_closure_list *list, grpc_closure *closure,
-                              grpc_error *error);
+inline bool grpc_closure_list_append(grpc_closure_list* closure_list,
+                                     grpc_closure* closure,
+                                     grpc_error_handle error) {
+  if (closure == nullptr) {
+    GRPC_ERROR_UNREF(error);
+    return false;
+  }
+#ifdef GRPC_ERROR_IS_ABSEIL_STATUS
+  closure->error_data.error = grpc_core::internal::StatusAllocHeapPtr(error);
+#else
+  closure->error_data.error = reinterpret_cast<intptr_t>(error);
+#endif
+  return grpc_closure_list_append(closure_list, closure);
+}
 
 /** force all success bits in \a list to false */
-void grpc_closure_list_fail_all(grpc_closure_list *list,
-                                grpc_error *forced_failure);
+inline void grpc_closure_list_fail_all(grpc_closure_list* list,
+                                       grpc_error_handle forced_failure) {
+  for (grpc_closure* c = list->head; c != nullptr; c = c->next_data.next) {
+    if (c->error_data.error == 0) {
+#ifdef GRPC_ERROR_IS_ABSEIL_STATUS
+      c->error_data.error =
+          grpc_core::internal::StatusAllocHeapPtr(forced_failure);
+#else
+      c->error_data.error =
+          reinterpret_cast<intptr_t>(GRPC_ERROR_REF(forced_failure));
+#endif
+    }
+  }
+  GRPC_ERROR_UNREF(forced_failure);
+}
 
 /** append all closures from \a src to \a dst and empty \a src. */
-void grpc_closure_list_move(grpc_closure_list *src, grpc_closure_list *dst);
+inline void grpc_closure_list_move(grpc_closure_list* src,
+                                   grpc_closure_list* dst) {
+  if (src->head == nullptr) {
+    return;
+  }
+  if (dst->head == nullptr) {
+    *dst = *src;
+  } else {
+    dst->tail->next_data.next = src->head;
+    dst->tail = src->tail;
+  }
+  src->head = src->tail = nullptr;
+}
 
 /** return whether \a list is empty. */
-bool grpc_closure_list_empty(grpc_closure_list list);
+inline bool grpc_closure_list_empty(grpc_closure_list closure_list) {
+  return closure_list.head == nullptr;
+}
 
-/** Run a closure directly. Caller ensures that no locks are being held above.
- *  Note that calling this at the end of a closure callback function itself is
- *  by definition safe. */
-void grpc_closure_run(grpc_exec_ctx *exec_ctx, grpc_closure *closure,
-                      grpc_error *error);
-
-/** Schedule a closure to be run. Does not need to be run from a safe point. */
-void grpc_closure_sched(grpc_exec_ctx *exec_ctx, grpc_closure *closure,
-                        grpc_error *error);
-
-/** Schedule all closures in a list to be run. Does not need to be run from a
- * safe point. */
-void grpc_closure_list_sched(grpc_exec_ctx *exec_ctx,
-                             grpc_closure_list *closure_list);
+namespace grpc_core {
+class Closure {
+ public:
+  static void Run(const DebugLocation& location, grpc_closure* closure,
+                  grpc_error_handle error) {
+    (void)location;
+    if (closure == nullptr) {
+      GRPC_ERROR_UNREF(error);
+      return;
+    }
+#ifndef NDEBUG
+    if (grpc_trace_closure.enabled()) {
+      gpr_log(GPR_DEBUG, "running closure %p: created [%s:%d]: run [%s:%d]",
+              closure, closure->file_created, closure->line_created,
+              location.file(), location.line());
+    }
+    GPR_ASSERT(closure->cb != nullptr);
+#endif
+    closure->cb(closure->cb_arg, error);
+#ifndef NDEBUG
+    if (grpc_trace_closure.enabled()) {
+      gpr_log(GPR_DEBUG, "closure %p finished", closure);
+    }
+#endif
+    GRPC_ERROR_UNREF(error);
+  }
+};
+}  // namespace grpc_core
 
 #endif /* GRPC_CORE_LIB_IOMGR_CLOSURE_H */

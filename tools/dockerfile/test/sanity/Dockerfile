@@ -1,122 +1,122 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-FROM ubuntu:15.10
+FROM silkeh/clang:13
 
-# Install Git and basic packages.
+#=================
+# Basic C core dependencies
+
+# C/C++ dependencies according to https://github.com/grpc/grpc/blob/master/BUILDING.md
 RUN apt-get update && apt-get install -y \
-  autoconf \
-  autotools-dev \
   build-essential \
-  bzip2 \
-  ccache \
-  curl \
+  autoconf \
+  libtool \
+  pkg-config \
+  && apt-get clean
+
+# GCC
+RUN apt-get update && apt-get install -y \
   gcc \
-  gcc-multilib \
-  git \
-  golang \
-  gyp \
-  lcov \
+  g++ \
+  && apt-get clean
+
+# libc6
+RUN apt-get update && apt-get install -y \
   libc6 \
   libc6-dbg \
   libc6-dev \
-  libgtest-dev \
-  libtool \
+  && apt-get clean
+
+# Tools
+RUN apt-get update && apt-get install -y \
+  bzip2 \
+  curl \
+  dnsutils \
+  git \
+  lcov \
   make \
-  perl \
   strace \
-  python-dev \
-  python-setuptools \
-  python-yaml \
-  telnet \
+  time \
   unzip \
   wget \
-  zip && apt-get clean
+  zip \
+  && apt-get clean
 
-#================
-# Build profiling
-RUN apt-get update && apt-get install -y time && apt-get clean
+#=================
+# C++ dependencies
+RUN apt-get update && apt-get -y install libc++-dev clang && apt-get clean
 
-#====================
-# Python dependencies
 
-# Install dependencies
+# Install Python 3.7 from source (and installed as a default python3)
+# (Bullseye comes with Python 3.9 which isn't supported by pytype yet)
+RUN apt update && apt install -y build-essential zlib1g-dev libncurses5-dev libgdbm-dev \
+                            libnss3-dev libssl-dev libreadline-dev libffi-dev libbz2-dev
+RUN curl -O https://www.python.org/ftp/python/3.7.9/Python-3.7.9.tar.xz && \
+tar -xf Python-3.7.9.tar.xz && \
+cd Python-3.7.9 && \
+./configure && \
+make -j 4 && \
+make install
+RUN curl https://bootstrap.pypa.io/get-pip.py | python3
 
-RUN apt-get update && apt-get install -y \
-    python-all-dev \
-    python3-all-dev \
-    python-pip
+# Google Cloud Platform API libraries
+# These are needed for uploading test results to BigQuery (e.g. by tools/run_tests scripts)
+RUN python3 -m pip install --upgrade google-auth==1.23.0 google-api-python-client==1.12.8 oauth2client==4.1.0
 
-# Install Python packages from PyPI
-RUN pip install pip --upgrade
-RUN pip install virtualenv
-RUN pip install futures==2.2.0 enum34==1.0.4 protobuf==3.2.0 six==1.10.0
+
+RUN mkdir /var/local/jenkins
+
 
 #========================
 # Sanity test dependencies
+
 RUN apt-get update && apt-get install -y \
-      python-pip \
       autoconf \
       automake \
       libtool \
       curl \
-      python-virtualenv \
-      python-lxml
-RUN pip install simplejson mako
+      shellcheck
 
-#======================================
-# More sanity test dependencies (bazel)
-RUN apt-get install -y openjdk-8-jdk
-# Check out Bazel version 0.4.1 since this version allows running
-# ./compile.sh without a local protoc dependency
-# TODO(mattkwong): install dependencies to support latest Bazel version if newer
-# version is needed
-RUN git clone https://github.com/bazelbuild/bazel.git /bazel && \
-  cd /bazel && git checkout tags/0.4.1 && ./compile.sh
-RUN ln -s /bazel/output/bazel /bin/
+# otherwise clang-tidy will report missing <gtest/gtest.h> header
+RUN apt-get update && apt-get install -y libgtest-dev && apt-get clean
 
-RUN apt-get update && apt-get -y install wget
-RUN echo deb http://llvm.org/apt/wily/ llvm-toolchain-wily-3.8 main >> /etc/apt/sources.list
-RUN echo deb-src http://llvm.org/apt/wily/ llvm-toolchain-wily-3.8 main >> /etc/apt/sources.list
-RUN wget -O - http://llvm.org/apt/llvm-snapshot.gpg.key| apt-key add -
-RUN apt-get update && apt-get -y install clang-format-3.8
+RUN python3 -m pip install simplejson mako virtualenv==16.7.9 lxml six
 
-# Prepare ccache
-RUN ln -s /usr/bin/ccache /usr/local/bin/gcc
-RUN ln -s /usr/bin/ccache /usr/local/bin/g++
-RUN ln -s /usr/bin/ccache /usr/local/bin/cc
-RUN ln -s /usr/bin/ccache /usr/local/bin/c++
-RUN ln -s /usr/bin/ccache /usr/local/bin/clang
-RUN ln -s /usr/bin/ccache /usr/local/bin/clang++
+# Upgrade Python's YAML library
+RUN python3 -m pip install --upgrade --ignore-installed PyYAML==5.4.1 --user
 
+# Install prerequisites for the clang-tidy script
+RUN apt-get update && apt-get install -y jq git
 
-RUN mkdir /var/local/jenkins
+#========================
+# Bazel installation
+
+# Must be in sync with tools/bazel
+ENV BAZEL_VERSION 4.2.1
+
+# The correct bazel version is already preinstalled, no need to use //tools/bazel wrapper.
+ENV DISABLE_BAZEL_WRAPPER 1
+
+RUN apt-get update && apt-get install -y wget && apt-get clean
+RUN wget "https://github.com/bazelbuild/bazel/releases/download/$BAZEL_VERSION/bazel-$BAZEL_VERSION-installer-linux-x86_64.sh" && \
+  bash ./bazel-$BAZEL_VERSION-installer-linux-x86_64.sh && \
+  rm bazel-$BAZEL_VERSION-installer-linux-x86_64.sh
+
+# Install buildifier v0.29.0
+RUN wget https://github.com/bazelbuild/buildtools/releases/download/0.29.0/buildifier
+RUN chmod +x buildifier
+RUN mv buildifier /usr/local/bin
 
 
 # Define the default command.

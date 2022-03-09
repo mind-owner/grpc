@@ -9,34 +9,39 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * Server-streaming response, as configured by the request and parameters.
- * </pre>
  *
- * Protobuf type <code>grpc.testing.StreamingOutputCallResponse</code>
+ * Generated from protobuf message <code>grpc.testing.StreamingOutputCallResponse</code>
  */
 class StreamingOutputCallResponse extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <pre>
      * Payload to increase response size.
-     * </pre>
      *
-     * <code>.grpc.testing.Payload payload = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.Payload payload = 1;</code>
      */
-    private $payload = null;
+    protected $payload = null;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type \Grpc\Testing\Payload $payload
+     *           Payload to increase response size.
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Messages::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <pre>
      * Payload to increase response size.
-     * </pre>
      *
-     * <code>.grpc.testing.Payload payload = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.Payload payload = 1;</code>
+     * @return \Grpc\Testing\Payload
      */
     public function getPayload()
     {
@@ -44,16 +49,18 @@ class StreamingOutputCallResponse extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Payload to increase response size.
-     * </pre>
      *
-     * <code>.grpc.testing.Payload payload = 1;</code>
+     * Generated from protobuf field <code>.grpc.testing.Payload payload = 1;</code>
+     * @param \Grpc\Testing\Payload $var
+     * @return $this
      */
-    public function setPayload(&$var)
+    public function setPayload($var)
     {
         GPBUtil::checkMessage($var, \Grpc\Testing\Payload::class);
         $this->payload = $var;
+
+        return $this;
     }
 
 }

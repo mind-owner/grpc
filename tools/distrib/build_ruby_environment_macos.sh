@@ -1,45 +1,31 @@
 #!/bin/bash
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 set -ex
 
 rm -rf ~/.rake-compiler
 
-CROSS_RUBY=`mktemp tmpfile.XXXXXXXX`
+CROSS_RUBY="$(pwd)/$(mktemp tmpfile.XXXXXXXX)"
 
-curl https://raw.githubusercontent.com/rake-compiler/rake-compiler/v1.0.3/tasks/bin/cross-ruby.rake > $CROSS_RUBY
+curl https://raw.githubusercontent.com/rake-compiler/rake-compiler/v1.1.1/tasks/bin/cross-ruby.rake > "$CROSS_RUBY"
 
-patch $CROSS_RUBY << EOF
---- cross-ruby.rake	2016-02-05 16:26:53.000000000 -0800
-+++ cross-ruby.rake.patched	2016-02-05 16:27:33.000000000 -0800
-@@ -133,7 +133,8 @@
+# See https://github.com/grpc/grpc/issues/12161 for verconf.h patch details
+patch "$CROSS_RUBY" << EOF
+--- cross-ruby.rake	2021-03-05 12:04:09.898286632 -0800
++++ patched	2021-03-05 12:05:35.594318962 -0800
+@@ -111,10 +111,11 @@
      "--host=#{MINGW_HOST}",
      "--target=#{MINGW_TARGET}",
      "--build=#{RUBY_BUILD}",
@@ -47,16 +33,66 @@ patch $CROSS_RUBY << EOF
 +    '--enable-static',
 +    '--disable-shared',
      '--disable-install-doc',
-     '--without-tk',
-     '--without-tcl'
++    '--without-gmp',
+     '--with-ext=',
+-    'LDFLAGS=-pipe -s',
+   ]
+ 
+   # Force Winsock2 for Ruby 1.8, 1.9 defaults to it
+@@ -130,6 +131,7 @@
+ # make
+ file "#{build_dir}/ruby.exe" => ["#{build_dir}/Makefile"] do |t|
+   chdir File.dirname(t.prerequisites.first) do
++    sh "test -s verconf.h || rm -f verconf.h"  # if verconf.h has size 0, make sure it gets re-built by make
+     sh MAKE
+   end
+ end
 EOF
 
 MAKE="make -j8"
 
-for v in 2.4.0 2.3.0 2.2.2 2.1.5 2.0.0-p645 ; do
+# Install ruby 3.0.0 for rake-compiler
+# Download ruby 3.0.0 sources outside of the cross-ruby.rake file, since the
+# latest rake-compiler/v1.1.1 cross-ruby.rake file requires tar.bz2 source
+# files.
+# TODO(apolcyn): remove this hack when tar.bz2 sources are available for ruby
+# 3.0.0 in https://ftp.ruby-lang.org/pub/ruby/3.0/. Also see
+# https://stackoverflow.com/questions/65477613/rvm-where-is-ruby-3-0-0.
+set +x # rvm commands are very verbose
+source ~/.rvm/scripts/rvm
+echo "rvm use 3.0.0"
+rvm use 3.0.0
+set -x
+RUBY_3_0_0_TAR="${HOME}/.rake-compiler/sources/ruby-3.0.0.tar.gz"
+mkdir -p "$(dirname $RUBY_3_0_0_TAR)"
+curl -L "https://ftp.ruby-lang.org/pub/ruby/3.0/$(basename $RUBY_3_0_0_TAR)" -o "$RUBY_3_0_0_TAR"
+ccache -c
+ruby --version | grep 'ruby 3.0.0'
+tools/run_tests/helper_scripts/bundle_install_wrapper.sh
+bundle exec rake -f "$CROSS_RUBY" cross-ruby VERSION=3.0.0 HOST=x86_64-darwin11 MAKE="$MAKE" SOURCE="$RUBY_3_0_0_TAR"
+echo "installed ruby 3.0.0 build targets"
+# Install ruby 2.7.0 for rake-compiler
+set +x
+echo "rvm use 2.7.0"
+rvm use 2.7.0
+set -x
+ruby --version | grep 'ruby 2.7.0'
+ccache -c
+tools/run_tests/helper_scripts/bundle_install_wrapper.sh
+bundle exec rake -f "$CROSS_RUBY" cross-ruby VERSION=2.7.0 HOST=x86_64-darwin11 MAKE="$MAKE"
+echo "installed ruby 2.7.0 build targets"
+# Install ruby 2.4-2.6 for rake-compiler
+set +x
+echo "rvm use 2.5.0"
+rvm use 2.5.0
+set -x
+ruby --version | grep 'ruby 2.5.0'
+for v in 2.6.0 2.5.0 2.4.0 ; do
   ccache -c
-  rake -f $CROSS_RUBY cross-ruby VERSION=$v HOST=x86_64-darwin11
+  tools/run_tests/helper_scripts/bundle_install_wrapper.sh
+  bundle exec rake -f "$CROSS_RUBY" cross-ruby VERSION="$v" HOST=x86_64-darwin11 MAKE="$MAKE"
+  echo "installed ruby $v build targets"
 done
 
-sed 's/x86_64-darwin-11/universal-darwin/' ~/.rake-compiler/config.yml > $CROSS_RUBY
-mv $CROSS_RUBY ~/.rake-compiler/config.yml
+sed 's/x86_64-darwin-11/universal-darwin/' ~/.rake-compiler/config.yml > "$CROSS_RUBY"
+mv "$CROSS_RUBY" ~/.rake-compiler/config.yml

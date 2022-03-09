@@ -9,19 +9,25 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * Once an RPC finishes, immediately start a new one.
  * No configuration parameters needed.
- * </pre>
  *
- * Protobuf type <code>grpc.testing.ClosedLoopParams</code>
+ * Generated from protobuf message <code>grpc.testing.ClosedLoopParams</code>
  */
 class ClosedLoopParams extends \Google\Protobuf\Internal\Message
 {
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
 }

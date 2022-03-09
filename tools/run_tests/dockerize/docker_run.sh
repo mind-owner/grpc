@@ -1,58 +1,66 @@
 #!/bin/bash
-# Copyright 2016, Google Inc.
-# All rights reserved.
+# Copyright 2016 The gRPC Authors
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
-# This script is invoked by build_docker_* inside a docker
+# This script is invoked by build_and_run_docker.sh inside a docker
 # container. You should never need to call this script on your own.
 
-set -ex
+set -e
 
-if [ "$RELATIVE_COPY_PATH" == "" ]
+if [ "${RELATIVE_COPY_PATH}" == "" ]
 then
   mkdir -p /var/local/git
-  git clone $EXTERNAL_GIT_ROOT /var/local/git/grpc
+  git clone "${EXTERNAL_GIT_ROOT}" /var/local/git/grpc
   # clone gRPC submodules, use data from locally cloned submodules where possible
-  (cd ${EXTERNAL_GIT_ROOT} && git submodule foreach 'cd /var/local/git/grpc \
-  && git submodule update --init --reference ${EXTERNAL_GIT_ROOT}/${name} \
-  ${name}')
+  # TODO: figure out a way to eliminate this following shellcheck suppressions
+  # shellcheck disable=SC2016,SC1004
+  (cd "${EXTERNAL_GIT_ROOT}" && git submodule foreach 'git clone ${EXTERNAL_GIT_ROOT}/${name} /var/local/git/grpc/${name}')
+  (cd /var/local/git/grpc && git submodule init)
 else
-  mkdir -p "/var/local/git/grpc/$RELATIVE_COPY_PATH"
-  cp -r "$EXTERNAL_GIT_ROOT/$RELATIVE_COPY_PATH"/* "/var/local/git/grpc/$RELATIVE_COPY_PATH"
-fi
-
-$POST_GIT_STEP
-
-if [ -x "$(command -v rvm)" ]
-then
-  rvm use ruby-2.1
+  mkdir -p "/var/local/git/grpc/${RELATIVE_COPY_PATH}"
+  cp -r "${EXTERNAL_GIT_ROOT}/${RELATIVE_COPY_PATH}"/* "/var/local/git/grpc/${RELATIVE_COPY_PATH}"
 fi
 
 cd /var/local/git/grpc
 
-$RUN_COMMAND
+# ensure the "reports" directory exists
+mkdir -p reports
+
+exit_code=0
+${DOCKER_RUN_SCRIPT_COMMAND} || exit_code=$?
+
+# copy reports/ dir and files matching one of the patterns to the well-known
+# location of report dir mounted to the docker container.
+# --parents preserves the directory structure for files matched by find.
+cp -r reports/ /var/local/report_dir
+find . -name report.xml -exec cp --parents {} /var/local/report_dir \;
+find . -name sponge_log.xml -exec cp --parents {} /var/local/report_dir \;
+find . -name 'report_*.xml' -exec cp --parents {} /var/local/report_dir \;
+chmod -R ugo+r /var/local/report_dir || true
+
+# Move contents of OUTPUT_DIR from under the workspace to a directory that will be visible to the docker host.
+if [ "${OUTPUT_DIR}" != "" ]
+then
+  # create the directory if it doesn't exist yet.
+  mkdir -p "${OUTPUT_DIR}"
+  mv "${OUTPUT_DIR}" /var/local/output_dir || exit_code=$?
+  chmod -R ugo+r /var/local/output_dir || true
+fi
+
+if [ -x "$(command -v ccache)" ]
+then
+  ccache --show-stats || true
+fi
+
+exit $exit_code

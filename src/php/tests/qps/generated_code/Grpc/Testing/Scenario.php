@@ -9,90 +9,95 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * A single performance scenario: input to qps_json_driver
- * </pre>
  *
- * Protobuf type <code>grpc.testing.Scenario</code>
+ * Generated from protobuf message <code>grpc.testing.Scenario</code>
  */
 class Scenario extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <pre>
      * Human readable name for this scenario
-     * </pre>
      *
-     * <code>string name = 1;</code>
+     * Generated from protobuf field <code>string name = 1;</code>
      */
-    private $name = '';
+    protected $name = '';
     /**
-     * <pre>
      * Client configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ClientConfig client_config = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.ClientConfig client_config = 2;</code>
      */
-    private $client_config = null;
+    protected $client_config = null;
     /**
-     * <pre>
      * Number of clients to start for the test
-     * </pre>
      *
-     * <code>int32 num_clients = 3;</code>
+     * Generated from protobuf field <code>int32 num_clients = 3;</code>
      */
-    private $num_clients = 0;
+    protected $num_clients = 0;
     /**
-     * <pre>
      * Server configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ServerConfig server_config = 4;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerConfig server_config = 4;</code>
      */
-    private $server_config = null;
+    protected $server_config = null;
     /**
-     * <pre>
      * Number of servers to start for the test
-     * </pre>
      *
-     * <code>int32 num_servers = 5;</code>
+     * Generated from protobuf field <code>int32 num_servers = 5;</code>
      */
-    private $num_servers = 0;
+    protected $num_servers = 0;
     /**
-     * <pre>
      * Warmup period, in seconds
-     * </pre>
      *
-     * <code>int32 warmup_seconds = 6;</code>
+     * Generated from protobuf field <code>int32 warmup_seconds = 6;</code>
      */
-    private $warmup_seconds = 0;
+    protected $warmup_seconds = 0;
     /**
-     * <pre>
      * Benchmark time, in seconds
-     * </pre>
      *
-     * <code>int32 benchmark_seconds = 7;</code>
+     * Generated from protobuf field <code>int32 benchmark_seconds = 7;</code>
      */
-    private $benchmark_seconds = 0;
+    protected $benchmark_seconds = 0;
     /**
-     * <pre>
      * Number of workers to spawn locally (usually zero)
-     * </pre>
      *
-     * <code>int32 spawn_local_worker_count = 8;</code>
+     * Generated from protobuf field <code>int32 spawn_local_worker_count = 8;</code>
      */
-    private $spawn_local_worker_count = 0;
+    protected $spawn_local_worker_count = 0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type string $name
+     *           Human readable name for this scenario
+     *     @type \Grpc\Testing\ClientConfig $client_config
+     *           Client configuration
+     *     @type int $num_clients
+     *           Number of clients to start for the test
+     *     @type \Grpc\Testing\ServerConfig $server_config
+     *           Server configuration
+     *     @type int $num_servers
+     *           Number of servers to start for the test
+     *     @type int $warmup_seconds
+     *           Warmup period, in seconds
+     *     @type int $benchmark_seconds
+     *           Benchmark time, in seconds
+     *     @type int $spawn_local_worker_count
+     *           Number of workers to spawn locally (usually zero)
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <pre>
      * Human readable name for this scenario
-     * </pre>
      *
-     * <code>string name = 1;</code>
+     * Generated from protobuf field <code>string name = 1;</code>
+     * @return string
      */
     public function getName()
     {
@@ -100,24 +105,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Human readable name for this scenario
-     * </pre>
      *
-     * <code>string name = 1;</code>
+     * Generated from protobuf field <code>string name = 1;</code>
+     * @param string $var
+     * @return $this
      */
     public function setName($var)
     {
         GPBUtil::checkString($var, True);
         $this->name = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Client configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ClientConfig client_config = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.ClientConfig client_config = 2;</code>
+     * @return \Grpc\Testing\ClientConfig
      */
     public function getClientConfig()
     {
@@ -125,24 +131,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Client configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ClientConfig client_config = 2;</code>
+     * Generated from protobuf field <code>.grpc.testing.ClientConfig client_config = 2;</code>
+     * @param \Grpc\Testing\ClientConfig $var
+     * @return $this
      */
-    public function setClientConfig(&$var)
+    public function setClientConfig($var)
     {
         GPBUtil::checkMessage($var, \Grpc\Testing\ClientConfig::class);
         $this->client_config = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Number of clients to start for the test
-     * </pre>
      *
-     * <code>int32 num_clients = 3;</code>
+     * Generated from protobuf field <code>int32 num_clients = 3;</code>
+     * @return int
      */
     public function getNumClients()
     {
@@ -150,24 +157,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Number of clients to start for the test
-     * </pre>
      *
-     * <code>int32 num_clients = 3;</code>
+     * Generated from protobuf field <code>int32 num_clients = 3;</code>
+     * @param int $var
+     * @return $this
      */
     public function setNumClients($var)
     {
         GPBUtil::checkInt32($var);
         $this->num_clients = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Server configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ServerConfig server_config = 4;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerConfig server_config = 4;</code>
+     * @return \Grpc\Testing\ServerConfig
      */
     public function getServerConfig()
     {
@@ -175,24 +183,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Server configuration
-     * </pre>
      *
-     * <code>.grpc.testing.ServerConfig server_config = 4;</code>
+     * Generated from protobuf field <code>.grpc.testing.ServerConfig server_config = 4;</code>
+     * @param \Grpc\Testing\ServerConfig $var
+     * @return $this
      */
-    public function setServerConfig(&$var)
+    public function setServerConfig($var)
     {
         GPBUtil::checkMessage($var, \Grpc\Testing\ServerConfig::class);
         $this->server_config = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Number of servers to start for the test
-     * </pre>
      *
-     * <code>int32 num_servers = 5;</code>
+     * Generated from protobuf field <code>int32 num_servers = 5;</code>
+     * @return int
      */
     public function getNumServers()
     {
@@ -200,24 +209,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Number of servers to start for the test
-     * </pre>
      *
-     * <code>int32 num_servers = 5;</code>
+     * Generated from protobuf field <code>int32 num_servers = 5;</code>
+     * @param int $var
+     * @return $this
      */
     public function setNumServers($var)
     {
         GPBUtil::checkInt32($var);
         $this->num_servers = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Warmup period, in seconds
-     * </pre>
      *
-     * <code>int32 warmup_seconds = 6;</code>
+     * Generated from protobuf field <code>int32 warmup_seconds = 6;</code>
+     * @return int
      */
     public function getWarmupSeconds()
     {
@@ -225,24 +235,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Warmup period, in seconds
-     * </pre>
      *
-     * <code>int32 warmup_seconds = 6;</code>
+     * Generated from protobuf field <code>int32 warmup_seconds = 6;</code>
+     * @param int $var
+     * @return $this
      */
     public function setWarmupSeconds($var)
     {
         GPBUtil::checkInt32($var);
         $this->warmup_seconds = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Benchmark time, in seconds
-     * </pre>
      *
-     * <code>int32 benchmark_seconds = 7;</code>
+     * Generated from protobuf field <code>int32 benchmark_seconds = 7;</code>
+     * @return int
      */
     public function getBenchmarkSeconds()
     {
@@ -250,24 +261,25 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Benchmark time, in seconds
-     * </pre>
      *
-     * <code>int32 benchmark_seconds = 7;</code>
+     * Generated from protobuf field <code>int32 benchmark_seconds = 7;</code>
+     * @param int $var
+     * @return $this
      */
     public function setBenchmarkSeconds($var)
     {
         GPBUtil::checkInt32($var);
         $this->benchmark_seconds = $var;
+
+        return $this;
     }
 
     /**
-     * <pre>
      * Number of workers to spawn locally (usually zero)
-     * </pre>
      *
-     * <code>int32 spawn_local_worker_count = 8;</code>
+     * Generated from protobuf field <code>int32 spawn_local_worker_count = 8;</code>
+     * @return int
      */
     public function getSpawnLocalWorkerCount()
     {
@@ -275,16 +287,18 @@ class Scenario extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Number of workers to spawn locally (usually zero)
-     * </pre>
      *
-     * <code>int32 spawn_local_worker_count = 8;</code>
+     * Generated from protobuf field <code>int32 spawn_local_worker_count = 8;</code>
+     * @param int $var
+     * @return $this
      */
     public function setSpawnLocalWorkerCount($var)
     {
         GPBUtil::checkInt32($var);
         $this->spawn_local_worker_count = $var;
+
+        return $this;
     }
 
 }

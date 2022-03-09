@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -39,19 +24,23 @@
 // FlatBuffers.
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "src/compiler/config.h"
 #include "src/compiler/schema_interface.h"
 
-#ifndef GRPC_CUSTOM_STRING
-#include <string>
-#define GRPC_CUSTOM_STRING std::string
+#ifdef GRPC_CUSTOM_STRING
+#warning GRPC_CUSTOM_STRING is no longer supported. Please use std::string.
 #endif
 
 namespace grpc {
 
-typedef GRPC_CUSTOM_STRING string;
+// Using grpc::string and grpc::to_string is discouraged in favor of
+// std::string and std::to_string. This is only for legacy code using
+// them explictly.
+using std::string;     // deprecated
+using std::to_string;  // deprecated
 
 }  // namespace grpc
 
@@ -60,44 +49,86 @@ namespace grpc_cpp_generator {
 // Contains all the parameters that are parsed from the command line.
 struct Parameters {
   // Puts the service into a namespace
-  grpc::string services_namespace;
+  std::string services_namespace;
   // Use system includes (<>) or local includes ("")
   bool use_system_headers;
   // Prefix to any grpc include
-  grpc::string grpc_search_path;
+  std::string grpc_search_path;
+  // Generate Google Mock code to facilitate unit testing.
+  bool generate_mock_code;
+  // Google Mock search path, when non-empty, local includes will be used.
+  std::string gmock_search_path;
+  // *EXPERIMENTAL* Additional include files in grpc.pb.h
+  std::vector<std::string> additional_header_includes;
+  // By default, use "pb.h"
+  std::string message_header_extension;
+  // Whether to include headers corresponding to imports in source file.
+  bool include_import_headers;
 };
 
 // Return the prologue of the generated header file.
-grpc::string GetHeaderPrologue(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetHeaderPrologue(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the includes needed for generated header file.
-grpc::string GetHeaderIncludes(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetHeaderIncludes(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the includes needed for generated source file.
-grpc::string GetSourceIncludes(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetSourceIncludes(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the epilogue of the generated header file.
-grpc::string GetHeaderEpilogue(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetHeaderEpilogue(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the prologue of the generated source file.
-grpc::string GetSourcePrologue(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetSourcePrologue(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the services for generated header file.
-grpc::string GetHeaderServices(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetHeaderServices(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the services for generated source file.
-grpc::string GetSourceServices(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetSourceServices(grpc_generator::File* file,
+                              const Parameters& params);
 
 // Return the epilogue of the generated source file.
-grpc::string GetSourceEpilogue(grpc_generator::File *file,
-                               const Parameters &params);
+std::string GetSourceEpilogue(grpc_generator::File* file,
+                              const Parameters& params);
+
+// Return the prologue of the generated mock file.
+std::string GetMockPrologue(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the includes needed for generated mock file.
+std::string GetMockIncludes(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the services for generated mock file.
+std::string GetMockServices(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the epilogue of generated mock file.
+std::string GetMockEpilogue(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the prologue of the generated mock file.
+std::string GetMockPrologue(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the includes needed for generated mock file.
+std::string GetMockIncludes(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the services for generated mock file.
+std::string GetMockServices(grpc_generator::File* file,
+                            const Parameters& params);
+
+// Return the epilogue of generated mock file.
+std::string GetMockEpilogue(grpc_generator::File* file,
+                            const Parameters& params);
 
 }  // namespace grpc_cpp_generator
 

@@ -1,108 +1,369 @@
-# Copyright 2017, Google Inc.
-# All rights reserved.
+# Copyright 2017 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-licenses(["notice"])  # 3-clause BSD
+load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_package")
+load("//test/cpp/microbenchmarks:grpc_benchmark_config.bzl", "grpc_benchmark_args")
 
-cc_test(
+licenses(["notice"])
+
+grpc_package(name = "test/cpp/microbenchmarks")
+
+grpc_cc_test(
     name = "noop-benchmark",
     srcs = ["noop-benchmark.cc"],
-    linkopts = ["-pthread"],
-    deps = ["//external:benchmark"],
+    external_deps = [
+        "benchmark",
+    ],
+    deps = ["//test/core/util:grpc_test_util"],
 )
 
-cc_library(
+grpc_cc_library(
     name = "helpers",
+    testonly = 1,
     srcs = ["helpers.cc"],
     hdrs = [
         "fullstack_context_mutators.h",
         "fullstack_fixtures.h",
         "helpers.h",
     ],
-    linkopts = ["-pthread"],
+    external_deps = [
+        "benchmark",
+    ],
     deps = [
-        "//:grpc++",
-        "//external:benchmark",
+        "//:grpc++_unsecure",
         "//src/proto/grpc/testing:echo_proto",
-        "//test/core/util:grpc_test_util",
+        "//test/core/util:grpc_test_util_unsecure",
+        "//test/cpp/util:test_config",
     ],
 )
 
-cc_test(
+# Need a secure version of helpers to benchmark opencensus
+grpc_cc_library(
+    name = "helpers_secure",
+    testonly = 1,
+    srcs = ["helpers.cc"],
+    hdrs = [
+        "fullstack_context_mutators.h",
+        "fullstack_fixtures.h",
+        "helpers.h",
+    ],
+    external_deps = [
+        "benchmark",
+    ],
+    deps = [
+        "//:grpc++",
+        "//src/proto/grpc/testing:echo_proto",
+        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_config",
+    ],
+)
+
+grpc_cc_test(
     name = "bm_closure",
     srcs = ["bm_closure.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
     deps = [":helpers"],
 )
 
-cc_test(
+grpc_cc_test(
+    name = "bm_alarm",
+    srcs = ["bm_alarm.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_arena",
+    size = "large",
+    srcs = ["bm_arena.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+        "notsan",
+    ],
+    uses_polling = False,
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_byte_buffer",
+    srcs = ["bm_byte_buffer.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    uses_polling = False,
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_channel",
+    srcs = ["bm_channel.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    uses_polling = False,
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_call_create",
+    srcs = ["bm_call_create.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    uses_polling = False,
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
     name = "bm_cq",
     srcs = ["bm_cq.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
     deps = [":helpers"],
 )
 
-cc_test(
+grpc_cc_test(
     name = "bm_cq_multiple_threads",
     srcs = ["bm_cq_multiple_threads.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    uses_polling = False,
     deps = [":helpers"],
 )
 
-cc_test(
-    name = "bm_error",
-    srcs = ["bm_error.cc"],
+grpc_cc_library(
+    name = "fullstack_streaming_ping_pong_h",
+    testonly = 1,
+    hdrs = [
+        "fullstack_streaming_ping_pong.h",
+    ],
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
     deps = [":helpers"],
 )
 
-cc_test(
+grpc_cc_test(
     name = "bm_fullstack_streaming_ping_pong",
-    srcs = ["bm_fullstack_streaming_ping_pong.cc"],
+    size = "large",
+    srcs = [
+        "bm_fullstack_streaming_ping_pong.cc",
+    ],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",  # to emulate "excluded_poll_engines: poll"
+        "no_windows",
+    ],
+    deps = [":fullstack_streaming_ping_pong_h"],
+)
+
+grpc_cc_library(
+    name = "fullstack_streaming_pump_h",
+    testonly = 1,
+    hdrs = [
+        "fullstack_streaming_pump.h",
+    ],
     deps = [":helpers"],
 )
 
-cc_test(
+grpc_cc_test(
     name = "bm_fullstack_streaming_pump",
-    srcs = ["bm_fullstack_streaming_pump.cc"],
+    srcs = [
+        "bm_fullstack_streaming_pump.cc",
+    ],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",  # to emulate "excluded_poll_engines: poll"
+        "no_windows",
+    ],
+    deps = [":fullstack_streaming_pump_h"],
+)
+
+grpc_cc_library(
+    name = "fullstack_unary_ping_pong_h",
+    testonly = 1,
+    hdrs = [
+        "fullstack_unary_ping_pong.h",
+    ],
     deps = [":helpers"],
 )
 
-cc_test(
-    name = "bm_fullstack_trickle",
-    srcs = ["bm_fullstack_trickle.cc"],
-    deps = [":helpers"],
-)
-
-cc_test(
+grpc_cc_test(
     name = "bm_fullstack_unary_ping_pong",
-    srcs = ["bm_fullstack_unary_ping_pong.cc"],
+    size = "large",
+    srcs = [
+        "bm_fullstack_unary_ping_pong.cc",
+    ],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",  # to emulate "excluded_poll_engines: poll"
+        "no_windows",
+    ],
+    deps = [":fullstack_unary_ping_pong_h"],
+)
+
+grpc_cc_test(
+    name = "bm_chttp2_hpack",
+    srcs = ["bm_chttp2_hpack.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    uses_polling = False,
     deps = [":helpers"],
 )
 
-cc_test(
-    name = "bm_metadata",
-    srcs = ["bm_metadata.cc"],
+grpc_cc_test(
+    name = "bm_chttp2_transport",
+    srcs = ["bm_chttp2_transport.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+        "nomsan",
+    ],
     deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_opencensus_plugin",
+    srcs = ["bm_opencensus_plugin.cc"],
+    args = grpc_benchmark_args(),
+    language = "C++",
+    deps = [
+        ":helpers_secure",
+        "//:grpc_opencensus_plugin",
+        "//src/proto/grpc/testing:echo_proto",
+    ],
+)
+
+grpc_cc_test(
+    name = "bm_pollset",
+    srcs = ["bm_pollset.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "no_mac",
+        "no_windows",
+    ],
+    deps = [":helpers"],
+)
+
+grpc_cc_test(
+    name = "bm_threadpool",
+    size = "large",
+    srcs = ["bm_threadpool.cc"],
+    args = grpc_benchmark_args(),
+    tags = [
+        "manual",
+        "no_windows",
+        "notap",
+    ],
+    uses_polling = False,
+    deps = [":helpers"],
+)
+
+grpc_cc_library(
+    name = "bm_callback_test_service_impl",
+    testonly = 1,
+    srcs = ["callback_test_service.cc"],
+    hdrs = ["callback_test_service.h"],
+    external_deps = [
+        "benchmark",
+    ],
+    deps = [
+        ":helpers",
+        "//src/proto/grpc/testing:echo_proto",
+        "//test/cpp/util:test_util_unsecure",
+    ],
+)
+
+grpc_cc_library(
+    name = "callback_unary_ping_pong_h",
+    testonly = 1,
+    hdrs = [
+        "callback_unary_ping_pong.h",
+    ],
+    deps = [
+        ":bm_callback_test_service_impl",
+        ":helpers",
+    ],
+)
+
+grpc_cc_test(
+    name = "bm_callback_unary_ping_pong",
+    size = "large",
+    srcs = [
+        "bm_callback_unary_ping_pong.cc",
+    ],
+    args = grpc_benchmark_args(),
+    tags = [
+        "manual",
+        "no_mac",
+        "no_windows",
+        "notap",
+    ],
+    deps = [":callback_unary_ping_pong_h"],
+)
+
+grpc_cc_library(
+    name = "callback_streaming_ping_pong_h",
+    testonly = 1,
+    hdrs = [
+        "callback_streaming_ping_pong.h",
+    ],
+    deps = [
+        ":bm_callback_test_service_impl",
+        ":helpers",
+    ],
+)
+
+grpc_cc_test(
+    name = "bm_callback_streaming_ping_pong",
+    size = "large",
+    srcs = [
+        "bm_callback_streaming_ping_pong.cc",
+    ],
+    args = grpc_benchmark_args(),
+    tags = [
+        "manual",
+        "no_mac",
+        "no_windows",
+        "notap",
+    ],
+    deps = [":callback_streaming_ping_pong_h"],
 )

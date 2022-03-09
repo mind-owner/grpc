@@ -9,14 +9,22 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>grpc.testing.CoreRequest</code>
+ * Generated from protobuf message <code>grpc.testing.CoreRequest</code>
  */
 class CoreRequest extends \Google\Protobuf\Internal\Message
 {
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
 }

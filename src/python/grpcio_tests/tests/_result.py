@@ -1,31 +1,16 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from __future__ import absolute_import
 
@@ -61,7 +46,7 @@ class CaseResult(
       None.
   """
 
-    class Kind:
+    class Kind(object):
         UNTESTED = 'untested'
         RUNNING = 'running'
         ERROR = 'error'
@@ -121,14 +106,13 @@ class CaseResult(
         stderr = self.stderr if stderr is None else stderr
         skip_reason = self.skip_reason if skip_reason is None else skip_reason
         traceback = self.traceback if traceback is None else traceback
-        return CaseResult(
-            id=self.id,
-            name=name,
-            kind=kind,
-            stdout=stdout,
-            stderr=stderr,
-            skip_reason=skip_reason,
-            traceback=traceback)
+        return CaseResult(id=self.id,
+                          name=name,
+                          kind=kind,
+                          stdout=stdout,
+                          stderr=stderr,
+                          skip_reason=skip_reason,
+                          traceback=traceback)
 
 
 class AugmentedResult(unittest.TestResult):
@@ -159,30 +143,27 @@ class AugmentedResult(unittest.TestResult):
         super(AugmentedResult, self).startTestRun()
         self.cases = dict()
 
-    def stopTestRun(self):
-        """See unittest.TestResult.stopTestRun."""
-        super(AugmentedResult, self).stopTestRun()
-
     def startTest(self, test):
         """See unittest.TestResult.startTest."""
         super(AugmentedResult, self).startTest(test)
         case_id = self.id_map(test)
-        self.cases[case_id] = CaseResult(
-            id=case_id, name=test.id(), kind=CaseResult.Kind.RUNNING)
+        self.cases[case_id] = CaseResult(id=case_id,
+                                         name=test.id(),
+                                         kind=CaseResult.Kind.RUNNING)
 
-    def addError(self, test, error):
+    def addError(self, test, err):
         """See unittest.TestResult.addError."""
-        super(AugmentedResult, self).addError(test, error)
+        super(AugmentedResult, self).addError(test, err)
         case_id = self.id_map(test)
         self.cases[case_id] = self.cases[case_id].updated(
-            kind=CaseResult.Kind.ERROR, traceback=error)
+            kind=CaseResult.Kind.ERROR, traceback=err)
 
-    def addFailure(self, test, error):
+    def addFailure(self, test, err):
         """See unittest.TestResult.addFailure."""
-        super(AugmentedResult, self).addFailure(test, error)
+        super(AugmentedResult, self).addFailure(test, err)
         case_id = self.id_map(test)
         self.cases[case_id] = self.cases[case_id].updated(
-            kind=CaseResult.Kind.FAILURE, traceback=error)
+            kind=CaseResult.Kind.FAILURE, traceback=err)
 
     def addSuccess(self, test):
         """See unittest.TestResult.addSuccess."""
@@ -198,12 +179,12 @@ class AugmentedResult(unittest.TestResult):
         self.cases[case_id] = self.cases[case_id].updated(
             kind=CaseResult.Kind.SKIP, skip_reason=reason)
 
-    def addExpectedFailure(self, test, error):
+    def addExpectedFailure(self, test, err):
         """See unittest.TestResult.addExpectedFailure."""
-        super(AugmentedResult, self).addExpectedFailure(test, error)
+        super(AugmentedResult, self).addExpectedFailure(test, err)
         case_id = self.id_map(test)
         self.cases[case_id] = self.cases[case_id].updated(
-            kind=CaseResult.Kind.EXPECTED_FAILURE, traceback=error)
+            kind=CaseResult.Kind.EXPECTED_FAILURE, traceback=err)
 
     def addUnexpectedSuccess(self, test):
         """See unittest.TestResult.addUnexpectedSuccess."""
@@ -230,7 +211,8 @@ class AugmentedResult(unittest.TestResult):
     Args:
       filter (callable): A unary predicate to filter over CaseResult objects.
     """
-        return (self.cases[case_id] for case_id in self.cases
+        return (self.cases[case_id]
+                for case_id in self.cases
                 if filter(self.cases[case_id]))
 
 
@@ -263,15 +245,8 @@ class CoverageResult(AugmentedResult):
         self.coverage_context.save()
         self.coverage_context = None
 
-    def stopTestRun(self):
-        """See unittest.TestResult.stopTestRun."""
-        super(CoverageResult, self).stopTestRun()
-        # TODO(atash): Dig deeper into why the following line fails to properly
-        # combine coverage data from the Cython plugin.
-        #coverage.Coverage().combine()
 
-
-class _Colors:
+class _Colors(object):
     """Namespaced constants for terminal color magic numbers."""
     HEADER = '\033[95m'
     INFO = '\033[94m'
@@ -309,16 +284,16 @@ class TerminalResult(CoverageResult):
         self.out.write(summary(self))
         self.out.flush()
 
-    def addError(self, test, error):
+    def addError(self, test, err):
         """See unittest.TestResult.addError."""
-        super(TerminalResult, self).addError(test, error)
+        super(TerminalResult, self).addError(test, err)
         self.out.write(_Colors.FAIL + 'ERROR         {}\n'.format(test.id()) +
                        _Colors.END)
         self.out.flush()
 
-    def addFailure(self, test, error):
+    def addFailure(self, test, err):
         """See unittest.TestResult.addFailure."""
-        super(TerminalResult, self).addFailure(test, error)
+        super(TerminalResult, self).addFailure(test, err)
         self.out.write(_Colors.FAIL + 'FAILURE       {}\n'.format(test.id()) +
                        _Colors.END)
         self.out.flush()
@@ -337,9 +312,9 @@ class TerminalResult(CoverageResult):
                        _Colors.END)
         self.out.flush()
 
-    def addExpectedFailure(self, test, error):
+    def addExpectedFailure(self, test, err):
         """See unittest.TestResult.addExpectedFailure."""
-        super(TerminalResult, self).addExpectedFailure(test, error)
+        super(TerminalResult, self).addExpectedFailure(test, err)
         self.out.write(_Colors.INFO + 'FAILURE_OK    {}\n'.format(test.id()) +
                        _Colors.END)
         self.out.flush()
@@ -397,13 +372,11 @@ def summary(result):
         result.augmented_results(
             lambda case_result: case_result.kind is CaseResult.Kind.SKIP))
     expected_failures = list(
-        result.augmented_results(
-            lambda case_result: case_result.kind is CaseResult.Kind.EXPECTED_FAILURE
-        ))
+        result.augmented_results(lambda case_result: case_result.kind is
+                                 CaseResult.Kind.EXPECTED_FAILURE))
     unexpected_successes = list(
-        result.augmented_results(
-            lambda case_result: case_result.kind is CaseResult.Kind.UNEXPECTED_SUCCESS
-        ))
+        result.augmented_results(lambda case_result: case_result.kind is
+                                 CaseResult.Kind.UNEXPECTED_SUCCESS))
     running_names = [case.name for case in running]
     finished_count = (len(failures) + len(errors) + len(successes) +
                       len(expected_failures) + len(unexpected_successes))
@@ -422,16 +395,17 @@ def summary(result):
                       expected_fail=len(expected_failures),
                       unexpected_successful=len(unexpected_successes),
                       interrupted=str(running_names)))
-    tracebacks = '\n\n'.join(
-        [(_Colors.FAIL + '{test_name}' + _Colors.END + '\n' + _Colors.BOLD +
-          'traceback:' + _Colors.END + '\n' + '{traceback}\n' + _Colors.BOLD +
-          'stdout:' + _Colors.END + '\n' + '{stdout}\n' + _Colors.BOLD +
-          'stderr:' + _Colors.END + '\n' + '{stderr}\n').format(
-              test_name=result.name,
-              traceback=_traceback_string(*result.traceback),
-              stdout=result.stdout,
-              stderr=result.stderr)
-         for result in itertools.chain(failures, errors)])
+    tracebacks = '\n\n'.join([
+        (_Colors.FAIL + '{test_name}' + _Colors.END + '\n' + _Colors.BOLD +
+         'traceback:' + _Colors.END + '\n' + '{traceback}\n' + _Colors.BOLD +
+         'stdout:' + _Colors.END + '\n' + '{stdout}\n' + _Colors.BOLD +
+         'stderr:' + _Colors.END + '\n' + '{stderr}\n').format(
+             test_name=result.name,
+             traceback=_traceback_string(*result.traceback),
+             stdout=result.stdout,
+             stderr=result.stderr)
+        for result in itertools.chain(failures, errors)
+    ])
     notes = 'Unexpected successes: {}\n'.format(
         [result.name for result in unexpected_successes])
     return statistics + '\nErrors/Failures: \n' + tracebacks + '\n' + notes

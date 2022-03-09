@@ -1,46 +1,47 @@
-@rem Copyright 2016, Google Inc.
-@rem All rights reserved.
+@rem Copyright 2016 gRPC authors.
 @rem
-@rem Redistribution and use in source and binary forms, with or without
-@rem modification, are permitted provided that the following conditions are
-@rem met:
+@rem Licensed under the Apache License, Version 2.0 (the "License");
+@rem you may not use this file except in compliance with the License.
+@rem You may obtain a copy of the License at
 @rem
-@rem     * Redistributions of source code must retain the above copyright
-@rem notice, this list of conditions and the following disclaimer.
-@rem     * Redistributions in binary form must reproduce the above
-@rem copyright notice, this list of conditions and the following disclaimer
-@rem in the documentation and/or other materials provided with the
-@rem distribution.
-@rem     * Neither the name of Google Inc. nor the names of its
-@rem contributors may be used to endorse or promote products derived from
-@rem this software without specific prior written permission.
+@rem     http://www.apache.org/licenses/LICENSE-2.0
 @rem
-@rem THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-@rem "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-@rem LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-@rem A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-@rem OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-@rem SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-@rem LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-@rem DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-@rem THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-@rem (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-@rem OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+@rem Unless required by applicable law or agreed to in writing, software
+@rem distributed under the License is distributed on an "AS IS" BASIS,
+@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+@rem See the License for the specific language governing permissions and
+@rem limitations under the License.
 
-mkdir artifacts
+mkdir -p %ARTIFACTS_OUT%
 
-setlocal
-cd third_party/protobuf/cmake
+@rem enter repo root
+cd /d %~dp0\..\..\..
 
-mkdir build & cd build
-mkdir solution & cd solution
-cmake -G "%generator%" -Dprotobuf_BUILD_TESTS=OFF ../.. || goto :error
-endlocal
+mkdir cmake
+cd cmake
+mkdir build
+cd build
 
-call vsprojects/build_plugins.bat || goto :error
+@rem Use externally provided env to determine build parallelism, otherwise use default.
+if "%GRPC_PROTOC_BUILD_COMPILER_JOBS%"=="" (
+  set GRPC_PROTOC_BUILD_COMPILER_JOBS=2
+)
 
-xcopy /Y third_party\protobuf\cmake\build\solution\Release\protoc.exe artifacts\ || goto :error
-xcopy /Y vsprojects\Release\*_plugin.exe artifacts\ || xcopy /Y vsprojects\x64\Release\*_plugin.exe artifacts\ || goto :error
+@rem set cl.exe build environment to build with VS2015 tooling
+@rem this is required for Ninja build to work
+call "%VS140COMNTOOLS%..\..\VC\vcvarsall.bat" %ARCHITECTURE%
+@rem restore command echo
+echo on
+
+@rem Select MSVC compiler (cl.exe) explicitly to make sure we don't end up gcc from mingw or cygwin
+@rem (both are on path in kokoro win workers)
+cmake -G Ninja -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE=Release -DgRPC_BUILD_TESTS=OFF -DgRPC_MSVC_STATIC_RUNTIME=ON ../../.. || goto :error
+
+ninja -j%GRPC_PROTOC_BUILD_COMPILER_JOBS% protoc plugins || goto :error
+cd ..\..
+
+xcopy /Y cmake\build\third_party\protobuf\protoc.exe %ARTIFACTS_OUT%\ || goto :error
+xcopy /Y cmake\build\*_plugin.exe %ARTIFACTS_OUT%\ || goto :error
 
 goto :EOF
 

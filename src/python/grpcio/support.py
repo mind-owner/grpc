@@ -1,39 +1,23 @@
-# Copyright 2016, Google Inc.
-# All rights reserved.
+# Copyright 2016 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+from distutils import errors
 import os
 import os.path
 import shutil
 import sys
 import tempfile
-
-from distutils import errors
 
 import commands
 
@@ -43,18 +27,25 @@ int main(int argc, char **argv) { return 0; }
 """
 C_PYTHON_DEV_ERROR_MESSAGE = """
 Could not find <Python.h>. This could mean the following:
-  * You're on Ubuntu and haven't run `apt-get install python-dev`.
-  * You're on RHEL/Fedora and haven't run `yum install python-devel` or
-    `dnf install python-devel` (make sure you also have redhat-rpm-config
+  * You're on Ubuntu and haven't run `apt-get install <PY_REPR>-dev`.
+  * You're on RHEL/Fedora and haven't run `yum install <PY_REPR>-devel` or
+    `dnf install <PY_REPR>-devel` (make sure you also have redhat-rpm-config
     installed)
   * You're on Mac OS X and the usual Python framework was somehow corrupted
     (check your environment variables or try re-installing?)
   * You're on Windows and your Python installation was somehow corrupted
     (check your environment variables or try re-installing?)
 """
+if sys.version_info[0] == 2:
+    PYTHON_REPRESENTATION = 'python'
+elif sys.version_info[0] == 3:
+    PYTHON_REPRESENTATION = 'python3'
+else:
+    raise NotImplementedError('Unsupported Python version: %s' % sys.version)
 
 C_CHECKS = {
-    C_PYTHON_DEV: C_PYTHON_DEV_ERROR_MESSAGE,
+    C_PYTHON_DEV:
+        C_PYTHON_DEV_ERROR_MESSAGE.replace('<PY_REPR>', PYTHON_REPRESENTATION),
 }
 
 
@@ -75,8 +66,8 @@ def _expect_compile(compiler, source_string, error_message):
     if _compile(compiler, source_string) is not None:
         sys.stderr.write(error_message)
         raise commands.CommandError(
-            "Diagnostics found a compilation environment issue:\n{}"
-            .format(error_message))
+            "Diagnostics found a compilation environment issue:\n{}".format(
+                error_message))
 
 
 def diagnose_compile_error(build_ext, error):
@@ -109,7 +100,7 @@ def diagnose_attribute_error(build_ext, error):
 
 _ERROR_DIAGNOSES = {
     errors.CompileError: diagnose_compile_error,
-    AttributeError: diagnose_attribute_error
+    AttributeError: diagnose_attribute_error,
 }
 
 
@@ -117,8 +108,10 @@ def diagnose_build_ext_error(build_ext, error, formatted):
     diagnostic = _ERROR_DIAGNOSES.get(type(error))
     if diagnostic is None:
         raise commands.CommandError(
-            "\n\nWe could not diagnose your build failure. Please file an issue at "
-            "http://www.github.com/grpc/grpc with `[Python install]` in the title."
-            "\n\n{}".format(formatted))
+            "\n\nWe could not diagnose your build failure. If you are unable to "
+            "proceed, please file an issue at http://www.github.com/grpc/grpc "
+            "with `[Python install]` in the title; please attach the whole log "
+            "(including everything that may have appeared above the Python "
+            "backtrace).\n\n{}".format(formatted))
     else:
         diagnostic(build_ext, error)

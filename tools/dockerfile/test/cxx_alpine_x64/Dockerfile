@@ -1,33 +1,18 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-FROM alpine:3.3
+FROM alpine:3.11
 
 # Install Git and basic packages.
 RUN apk update && apk add \
@@ -41,32 +26,46 @@ RUN apk update && apk add \
   gcc \
   git \
   libtool \
+  linux-headers \
   make \
   perl \
   strace \
-  python-dev \
-  py-pip \
+  python3 \
+  py3-pip \
   unzip \
   wget \
   zip
 
-# Install Python packages from PyPI
-RUN pip install pip --upgrade
-RUN pip install virtualenv
-RUN pip install futures==2.2.0 enum34==1.0.4 protobuf==3.2.0 six==1.10.0
+# use pinned version of pip to avoid sudden breakages
+RUN python3 -m pip install --upgrade pip==19.3.1
 
-# Prepare ccache
-RUN ln -s /usr/bin/ccache /usr/local/bin/gcc
-RUN ln -s /usr/bin/ccache /usr/local/bin/g++
-RUN ln -s /usr/bin/ccache /usr/local/bin/cc 
-RUN ln -s /usr/bin/ccache /usr/local/bin/c++
+# TODO(jtattermusch): currently six is needed for tools/run_tests scripts
+# but since our python2 usage is deprecated, we should get rid of it.
+RUN python3 -m pip install six==1.16.0
 
-# Install gflags
-RUN git clone https://github.com/gflags/gflags.git && cd gflags && git checkout v2.2.0
-RUN cd gflags && cmake . && make && make install
-RUN ln -s /usr/local/include/gflags /usr/include/gflags
+# Google Cloud Platform API libraries
+# These are needed for uploading test results to BigQuery (e.g. by tools/run_tests scripts)
+RUN python3 -m pip install --upgrade google-auth==1.24.0 google-api-python-client==1.12.8 oauth2client==4.1.0
 
-RUN mkdir -p /var/local/jenkins
+RUN python3 -m pip install --upgrade --ignore-installed PyYAML==5.4.1 --user
 
+#=================
+# Install ccache
+
+# Install ccache from source since ccache 3.x packaged with most linux distributions
+# does not support Redis backend for caching.
+RUN curl -sSL -o ccache.tar.gz https://github.com/ccache/ccache/releases/download/v4.5.1/ccache-4.5.1.tar.gz \
+    && tar -zxf ccache.tar.gz \
+    && cd ccache-4.5.1 \
+    && mkdir build && cd build \
+    && cmake -DCMAKE_BUILD_TYPE=Release -DZSTD_FROM_INTERNET=ON -DHIREDIS_FROM_INTERNET=ON .. \
+    && make -j4 && make install \
+    && cd ../.. \
+    && rm -rf ccache-4.5.1 ccache.tar.gz
+
+
+RUN mkdir /var/local/jenkins
+
+  
 # Define the default command.
 CMD ["bash"]

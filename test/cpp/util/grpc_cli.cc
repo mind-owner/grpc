@@ -1,33 +1,18 @@
 /*
 
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -37,7 +22,8 @@
 
   Example of talking to grpc interop server:
   grpc_cli call localhost:50051 UnaryCall "response_size:10" \
-      --protofiles=src/proto/grpc/testing/test.proto --enable_ssl=false
+      --protofiles=src/proto/grpc/testing/test.proto \
+      --channel_creds_type=insecure
 
   Options:
     1. --protofiles, use this flag to provide proto files if the server does
@@ -48,7 +34,8 @@
        provided.
     3. --metadata specifies metadata to be sent to the server, such as:
        --metadata="MyHeaderKey1:Value1:MyHeaderKey2:Value2"
-    4. --enable_ssl, whether to use tls.
+    4. --channel_creds_type, whether to use tls, insecure or platform-specific
+       options.
     5. --use_auth, if set to true, attach a GoogleDefaultCredentials to the call
     6. --infile, input filename (defaults to stdin)
     7. --outfile, output filename (defaults to stdout)
@@ -66,27 +53,33 @@
        --decode=grpc.testing.SimpleResponse \
        src/proto/grpc/testing/messages.proto \
        < output.bin > output.txt
+   10. --default_service_config, optional default service config to use
+       on the channel. Note that this may be ignored if the name resolver
+       returns a service config.
+   11. --display_peer_address, on CallMethod commands, log the peer socket
+       address of the connection that each RPC is made on to stderr.
 */
 
 #include <fstream>
 #include <functional>
 #include <iostream>
 
-#include <gflags/gflags.h>
-#include <grpc++/support/config.h>
+#include "absl/flags/flag.h"
+
+#include <grpcpp/support/config.h>
+
 #include "test/cpp/util/cli_credentials.h"
 #include "test/cpp/util/grpc_tool.h"
 #include "test/cpp/util/test_config.h"
 
-DEFINE_string(outfile, "", "Output file (default is stdout)");
+ABSL_FLAG(std::string, outfile, "", "Output file (default is stdout)");
 
-static bool SimplePrint(const grpc::string& outfile,
-                        const grpc::string& output) {
+static bool SimplePrint(const std::string& outfile, const std::string& output) {
   if (outfile.empty()) {
-    std::cout << output << std::endl;
+    std::cout << output << std::flush;
   } else {
     std::ofstream output_file(outfile, std::ios::app | std::ios::binary);
-    output_file << output << std::endl;
+    output_file << output << std::flush;
     output_file.close();
   }
   return true;
@@ -96,6 +89,7 @@ int main(int argc, char** argv) {
   grpc::testing::InitTest(&argc, &argv, true);
 
   return grpc::testing::GrpcToolMainLib(
-      argc, (const char**)argv, grpc::testing::CliCredentials(),
-      std::bind(SimplePrint, FLAGS_outfile, std::placeholders::_1));
+      argc, const_cast<const char**>(argv), grpc::testing::CliCredentials(),
+      std::bind(SimplePrint, absl::GetFlag(FLAGS_outfile),
+                std::placeholders::_1));
 }

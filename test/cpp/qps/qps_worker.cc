@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -40,22 +25,26 @@
 #include <thread>
 #include <vector>
 
-#include <grpc++/client_context.h>
-#include <grpc++/security/server_credentials.h>
-#include <grpc++/server.h>
-#include <grpc++/server_builder.h>
+#include "absl/memory/memory.h"
+
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/cpu.h>
-#include <grpc/support/histogram.h>
-#include <grpc/support/host_port.h>
 #include <grpc/support/log.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
 
-#include "src/proto/grpc/testing/services.pb.h"
+#include "src/core/lib/gprpp/host_port.h"
+#include "src/proto/grpc/testing/worker_service.grpc.pb.h"
 #include "test/core/util/grpc_profiler.h"
+#include "test/core/util/histogram.h"
 #include "test/cpp/qps/client.h"
+#include "test/cpp/qps/qps_server_builder.h"
 #include "test/cpp/qps/server.h"
 #include "test/cpp/util/create_test_channel.h"
+#include "test/cpp/util/test_credentials_provider.h"
 
 namespace grpc {
 namespace testing {
@@ -68,19 +57,16 @@ static std::unique_ptr<Client> CreateClient(const ClientConfig& config) {
 
   switch (config.client_type()) {
     case ClientType::SYNC_CLIENT:
-      return (config.rpc_type() == RpcType::UNARY)
-                 ? CreateSynchronousUnaryClient(config)
-                 : CreateSynchronousStreamingClient(config);
+      return CreateSynchronousClient(config);
     case ClientType::ASYNC_CLIENT:
-      return (config.rpc_type() == RpcType::UNARY)
-                 ? CreateAsyncUnaryClient(config)
-                 : (config.payload_config().has_bytebuf_params()
-                        ? CreateGenericAsyncStreamingClient(config)
-                        : CreateAsyncStreamingClient(config));
+      return config.payload_config().has_bytebuf_params()
+                 ? CreateGenericAsyncStreamingClient(config)
+                 : CreateAsyncClient(config);
+    case ClientType::CALLBACK_CLIENT:
+      return CreateCallbackClient(config);
     default:
       abort();
   }
-  abort();
 }
 
 static std::unique_ptr<Server> CreateServer(const ServerConfig& config) {
@@ -94,10 +80,11 @@ static std::unique_ptr<Server> CreateServer(const ServerConfig& config) {
       return CreateAsyncServer(config);
     case ServerType::ASYNC_GENERIC_SERVER:
       return CreateAsyncGenericServer(config);
+    case ServerType::CALLBACK_SERVER:
+      return CreateCallbackServer(config);
     default:
       abort();
   }
-  abort();
 }
 
 class ScopedProfile final {
@@ -121,6 +108,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
   Status RunClient(
       ServerContext* ctx,
       ServerReaderWriter<ClientStatus, ClientArgs>* stream) override {
+    gpr_log(GPR_INFO, "RunClient: Entering");
     InstanceGuard g(this);
     if (!g.Acquired()) {
       return Status(StatusCode::RESOURCE_EXHAUSTED, "Client worker busy");
@@ -135,6 +123,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
   Status RunServer(
       ServerContext* ctx,
       ServerReaderWriter<ServerStatus, ServerArgs>* stream) override {
+    gpr_log(GPR_INFO, "RunServer: Entering");
     InstanceGuard g(this);
     if (!g.Acquired()) {
       return Status(StatusCode::RESOURCE_EXHAUSTED, "Server worker busy");
@@ -146,13 +135,13 @@ class WorkerServiceImpl final : public WorkerService::Service {
     return ret;
   }
 
-  Status CoreCount(ServerContext* ctx, const CoreRequest*,
+  Status CoreCount(ServerContext* /*ctx*/, const CoreRequest*,
                    CoreResponse* resp) override {
     resp->set_cores(gpr_cpu_num_cores());
     return Status::OK;
   }
 
-  Status QuitWorker(ServerContext* ctx, const Void*, Void*) override {
+  Status QuitWorker(ServerContext* /*ctx*/, const Void*, Void*) override {
     InstanceGuard g(this);
     if (!g.Acquired()) {
       return Status(StatusCode::RESOURCE_EXHAUSTED, "Quitting worker busy");
@@ -166,7 +155,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
   // Protect against multiple clients using this worker at once.
   class InstanceGuard {
    public:
-    InstanceGuard(WorkerServiceImpl* impl)
+    explicit InstanceGuard(WorkerServiceImpl* impl)
         : impl_(impl), acquired_(impl->TryAcquireInstance()) {}
     ~InstanceGuard() {
       if (acquired_) {
@@ -194,7 +183,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
     acquired_ = false;
   }
 
-  Status RunClientBody(ServerContext* ctx,
+  Status RunClientBody(ServerContext* /*ctx*/,
                        ServerReaderWriter<ClientStatus, ClientArgs>* stream) {
     ClientArgs args;
     if (!stream->Read(&args)) {
@@ -204,7 +193,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
       return Status(StatusCode::INVALID_ARGUMENT, "Invalid setup arg");
     }
     gpr_log(GPR_INFO, "RunClientBody: about to create client");
-    auto client = CreateClient(args.setup());
+    std::unique_ptr<Client> client = CreateClient(args.setup());
     if (!client) {
       return Status(StatusCode::INVALID_ARGUMENT, "Couldn't create client");
     }
@@ -234,7 +223,7 @@ class WorkerServiceImpl final : public WorkerService::Service {
     return Status::OK;
   }
 
-  Status RunServerBody(ServerContext* ctx,
+  Status RunServerBody(ServerContext* /*ctx*/,
                        ServerReaderWriter<ServerStatus, ServerArgs>* stream) {
     ServerArgs args;
     if (!stream->Read(&args)) {
@@ -243,11 +232,14 @@ class WorkerServiceImpl final : public WorkerService::Service {
     if (!args.has_setup()) {
       return Status(StatusCode::INVALID_ARGUMENT, "Bad server creation args");
     }
-    if (server_port_ != 0) {
+    if (server_port_ > 0 && args.setup().port() == 0) {
       args.mutable_setup()->set_port(server_port_);
     }
     gpr_log(GPR_INFO, "RunServerBody: about to create server");
-    auto server = CreateServer(args.setup());
+    std::unique_ptr<Server> server = CreateServer(args.setup());
+    if (g_inproc_servers != nullptr) {
+      g_inproc_servers->push_back(server.get());
+    }
     if (!server) {
       return Status(StatusCode::INVALID_ARGUMENT, "Couldn't create server");
     }
@@ -282,20 +274,31 @@ class WorkerServiceImpl final : public WorkerService::Service {
   QpsWorker* worker_;
 };
 
-QpsWorker::QpsWorker(int driver_port, int server_port) {
-  impl_.reset(new WorkerServiceImpl(server_port, this));
+QpsWorker::QpsWorker(int driver_port, int server_port,
+                     const std::string& credential_type) {
+  impl_ = absl::make_unique<WorkerServiceImpl>(server_port, this);
   gpr_atm_rel_store(&done_, static_cast<gpr_atm>(0));
 
-  char* server_address = NULL;
-  gpr_join_host_port(&server_address, "::", driver_port);
+  std::unique_ptr<ServerBuilder> builder = CreateQpsServerBuilder();
+  builder->AddChannelArgument(GRPC_ARG_ALLOW_REUSEPORT, 0);
+  if (driver_port >= 0) {
+    std::string server_address = grpc_core::JoinHostPort("::", driver_port);
+    builder->AddListeningPort(
+        server_address.c_str(),
+        GetCredentialsProvider()->GetServerCredentials(credential_type));
+  }
+  builder->RegisterService(impl_.get());
 
-  ServerBuilder builder;
-  builder.AddListeningPort(server_address, InsecureServerCredentials());
-  builder.RegisterService(impl_.get());
-
-  gpr_free(server_address);
-
-  server_ = builder.BuildAndStart();
+  server_ = builder->BuildAndStart();
+  if (server_ == nullptr) {
+    gpr_log(GPR_ERROR,
+            "QpsWorker: Fail to BuildAndStart(driver_port=%d, server_port=%d)",
+            driver_port, server_port);
+  } else {
+    gpr_log(GPR_INFO,
+            "QpsWorker: BuildAndStart(driver_port=%d, server_port=%d) done",
+            driver_port, server_port);
+  }
 }
 
 QpsWorker::~QpsWorker() {}

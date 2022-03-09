@@ -1,51 +1,39 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #include <thread>
 
-#include <grpc++/channel.h>
-#include <grpc++/client_context.h>
-#include <grpc++/create_channel.h>
-#include <grpc++/impl/server_builder_option.h>
-#include <grpc++/impl/server_builder_plugin.h>
-#include <grpc++/impl/server_initializer.h>
-#include <grpc++/security/credentials.h>
-#include <grpc++/security/server_credentials.h>
-#include <grpc++/server.h>
-#include <grpc++/server_builder.h>
-#include <grpc++/server_context.h>
-#include <grpc/grpc.h>
 #include <gtest/gtest.h>
+
+#include "absl/memory/memory.h"
+
+#include <grpc/grpc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/impl/server_builder_option.h>
+#include <grpcpp/impl/server_builder_plugin.h>
+#include <grpcpp/impl/server_initializer.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
 
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/core/util/port.h"
@@ -66,7 +54,7 @@ class TestServerBuilderPlugin : public ServerBuilderPlugin {
     register_service_ = false;
   }
 
-  grpc::string name() override { return PLUGIN_NAME; }
+  std::string name() override { return PLUGIN_NAME; }
 
   void InitServer(ServerInitializer* si) override {
     init_server_is_called_ = true;
@@ -75,9 +63,9 @@ class TestServerBuilderPlugin : public ServerBuilderPlugin {
     }
   }
 
-  void Finish(ServerInitializer* si) override { finish_is_called_ = true; }
+  void Finish(ServerInitializer* /*si*/) override { finish_is_called_ = true; }
 
-  void ChangeArguments(const grpc::string& name, void* value) override {
+  void ChangeArguments(const std::string& /*name*/, void* /*value*/) override {
     change_arguments_is_called_ = true;
   }
 
@@ -113,7 +101,7 @@ class InsertPluginServerBuilderOption : public ServerBuilderOption {
  public:
   InsertPluginServerBuilderOption() { register_service_ = false; }
 
-  void UpdateArguments(ChannelArguments* arg) override {}
+  void UpdateArguments(ChannelArguments* /*arg*/) override {}
 
   void UpdatePlugins(
       std::vector<std::unique_ptr<ServerBuilderPlugin>>* plugins) override {
@@ -135,17 +123,12 @@ std::unique_ptr<ServerBuilderPlugin> CreateTestServerBuilderPlugin() {
   return std::unique_ptr<ServerBuilderPlugin>(new TestServerBuilderPlugin());
 }
 
-void AddTestServerBuilderPlugin() {
-  static bool already_here = false;
-  if (already_here) return;
-  already_here = true;
-  ::grpc::ServerBuilder::InternalAddPluginFactory(
-      &CreateTestServerBuilderPlugin);
-}
-
 // Force AddServerBuilderPlugin() to be called at static initialization time.
 struct StaticTestPluginInitializer {
-  StaticTestPluginInitializer() { AddTestServerBuilderPlugin(); }
+  StaticTestPluginInitializer() {
+    grpc::ServerBuilder::InternalAddPluginFactory(
+        &CreateTestServerBuilderPlugin);
+  }
 } static_plugin_initializer_test_;
 
 // When the param boolean is true, the ServerBuilder plugin will be added at the
@@ -157,7 +140,7 @@ class ServerBuilderPluginTest : public ::testing::TestWithParam<bool> {
 
   void SetUp() override {
     port_ = grpc_pick_unused_port_or_die();
-    builder_.reset(new ServerBuilder());
+    builder_ = absl::make_unique<ServerBuilder>();
   }
 
   void InsertPlugin() {
@@ -187,7 +170,7 @@ class ServerBuilderPluginTest : public ::testing::TestWithParam<bool> {
   }
 
   void StartServer() {
-    grpc::string server_address = "localhost:" + to_string(port_);
+    std::string server_address = "localhost:" + to_string(port_);
     builder_->AddListeningPort(server_address, InsecureServerCredentials());
     // we run some tests without a service, and for those we need to supply a
     // frequently polled completion queue
@@ -199,7 +182,7 @@ class ServerBuilderPluginTest : public ::testing::TestWithParam<bool> {
 
   void ResetStub() {
     string target = "dns:localhost:" + to_string(port_);
-    channel_ = CreateChannel(target, InsecureChannelCredentials());
+    channel_ = grpc::CreateChannel(target, InsecureChannelCredentials());
     stub_ = grpc::testing::EchoTestService::NewStub(channel_);
   }
 
@@ -246,8 +229,8 @@ class ServerBuilderPluginTest : public ::testing::TestWithParam<bool> {
   void RunCQ() {
     void* tag;
     bool ok;
-    while (cq_->Next(&tag, &ok))
-      ;
+    while (cq_->Next(&tag, &ok)) {
+    }
   }
 };
 
@@ -271,14 +254,14 @@ TEST_P(ServerBuilderPluginTest, PluginWithServiceTest) {
   EXPECT_TRUE(s.ok());
 }
 
-INSTANTIATE_TEST_CASE_P(ServerBuilderPluginTest, ServerBuilderPluginTest,
-                        ::testing::Values(false, true));
+INSTANTIATE_TEST_SUITE_P(ServerBuilderPluginTest, ServerBuilderPluginTest,
+                         ::testing::Values(false, true));
 
 }  // namespace testing
 }  // namespace grpc
 
 int main(int argc, char** argv) {
-  grpc_test_init(argc, argv);
+  grpc::testing::TestEnvironment env(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

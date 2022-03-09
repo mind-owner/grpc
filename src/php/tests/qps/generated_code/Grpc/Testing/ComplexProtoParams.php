@@ -9,19 +9,25 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * TODO (vpai): Fill this in once the details of complex, representative
  *              protos are decided
- * </pre>
  *
- * Protobuf type <code>grpc.testing.ComplexProtoParams</code>
+ * Generated from protobuf message <code>grpc.testing.ComplexProtoParams</code>
  */
 class ComplexProtoParams extends \Google\Protobuf\Internal\Message
 {
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Payloads::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
 }

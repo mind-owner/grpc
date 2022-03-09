@@ -1,57 +1,48 @@
 #!/bin/sh
 
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 set -e
 
 export TEST=true
 
-cd `dirname $0`/../../..
+cd "$(dirname "$0")/../../.."
 
-submodules=`mktemp /tmp/submXXXXXX`
-want_submodules=`mktemp /tmp/submXXXXXX`
+submodules=$(mktemp /tmp/submXXXXXX)
+want_submodules=$(mktemp /tmp/submXXXXXX)
 
-git submodule | awk '{ print $1 }' | sort > $submodules
-cat << EOF | awk '{ print $1 }' | sort > $want_submodules
- 44c25c892a6229b20db7cd9dc05584ea865896de third_party/benchmark (v0.1.0-343-g44c25c8)
- 78684e5b222645828ca302e56b40b9daff2b2d27 third_party/boringssl (78684e5)
- 886e7d75368e3f4fab3f4d0d3584e4abfc557755 third_party/boringssl-with-bazel (version_for_cocoapods_7.0-857-g886e7d7)
- 30dbc81fb5ffdc98ea9b14b1918bfe4e8779b26e third_party/gflags (v2.2.0)
- ec44c6c1675c25b9827aacd08c02433cccde7780 third_party/googletest (release-1.8.0)
- 4a0dd03e52e09332c8fd0f8f26a8e0ae9f911182 third_party/protobuf (v3.1.0-alpha-1-548-g4a0dd03e)
- bcad91771b7f0bff28a1cac1981d7ef2b9bcef3c third_party/thrift (bcad917)
- 50893291621658f355bc5b4d450a8d06a563053d third_party/zlib (v1.2.8)
- 7691f773af79bf75a62d1863fd0f13ebf9dc51b1 third_party/cares/cares (1.12.0)
+git submodule | awk '{ print $2 " " $1 }' | sort >"$submodules"
+cat <<EOF | sort >"$want_submodules"
+third_party/abseil-cpp 215105818dfde3174fe799600bb0f3cae233d0bf
+third_party/benchmark 0baacde3618ca617da95375e0af13ce1baadea47
+third_party/bloaty 60209eb1ccc34d5deefb002d1b7f37545204f7f2
+third_party/boringssl-with-bazel b9232f9e27e5668bc0414879dcdedb2a59ea75f2
+third_party/cares/cares 6654436a307a5a686b008c1d4c93b0085da6e6d8
+third_party/envoy-api ff47e0a4bd03c0580305f9b138cc7937b63f7900
+third_party/googleapis 2f9af297c84c55c8b871ba4495e01ade42476c92
+third_party/googletest 0e402173c97aea7a00749e825b194bfede4f2e45
+third_party/libuv 02a9e1be252b623ee032a3137c0b0c94afbe6809
+third_party/opencensus-proto 4aa53e15cbf1a47bc9087e6cfdca214c1eea4e89
+third_party/opentelemetry 60fa8754d890b5c55949a8c68dcfd7ab5c2395df
+third_party/protobuf 22d0e265de7d2b3d2e9a00d071313502e7d4cccf
+third_party/protoc-gen-validate 59da36e59fef2267fc2b1849a05159e3ecdf24f3
+third_party/re2 8e08f47b11b413302749c0d8b17a1c94777495d5
+third_party/xds cb28da3451f158a947dfc45090fe92b07b243bc1
+third_party/zlib cacf7f1d4e3d44d871b605da3b647f07d718623f
 EOF
 
-diff -u $submodules $want_submodules
+diff -u "$submodules" "$want_submodules"
 
-rm $submodules $want_submodules
+rm "$submodules" "$want_submodules"

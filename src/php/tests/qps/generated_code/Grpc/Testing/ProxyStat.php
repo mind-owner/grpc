@@ -9,22 +9,32 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>grpc.testing.ProxyStat</code>
+ * Generated from protobuf message <code>grpc.testing.ProxyStat</code>
  */
 class ProxyStat extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <code>double latency = 1;</code>
+     * Generated from protobuf field <code>double latency = 1;</code>
      */
-    private $latency = 0.0;
+    protected $latency = 0.0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type float $latency
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\ProxyService::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <code>double latency = 1;</code>
+     * Generated from protobuf field <code>double latency = 1;</code>
+     * @return float
      */
     public function getLatency()
     {
@@ -32,12 +42,16 @@ class ProxyStat extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>double latency = 1;</code>
+     * Generated from protobuf field <code>double latency = 1;</code>
+     * @param float $var
+     * @return $this
      */
     public function setLatency($var)
     {
         GPBUtil::checkDouble($var);
         $this->latency = $var;
+
+        return $this;
     }
 
 }

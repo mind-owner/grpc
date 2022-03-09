@@ -1,47 +1,35 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
-#include <grpc++/channel.h>
-#include <grpc++/client_context.h>
-#include <grpc++/create_channel.h>
-#include <grpc++/ext/proto_server_reflection_plugin.h>
-#include <grpc++/security/credentials.h>
-#include <grpc++/security/server_credentials.h>
-#include <grpc++/server.h>
-#include <grpc++/server_builder.h>
-#include <grpc++/server_context.h>
-#include <grpc/grpc.h>
 #include <gtest/gtest.h>
+
+#include "absl/memory/memory.h"
+
+#include <grpc/grpc.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/client_context.h>
+#include <grpcpp/create_channel.h>
+#include <grpcpp/ext/proto_server_reflection_plugin.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/security/server_credentials.h>
+#include <grpcpp/server.h>
+#include <grpcpp/server_builder.h>
+#include <grpcpp/server_context.h>
 
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/core/util/port.h"
@@ -61,7 +49,7 @@ class ProtoServerReflectionTest : public ::testing::Test {
     ref_desc_pool_ = protobuf::DescriptorPool::generated_pool();
 
     ServerBuilder builder;
-    grpc::string server_address = "localhost:" + to_string(port_);
+    std::string server_address = "localhost:" + to_string(port_);
     builder.AddListeningPort(server_address, InsecureServerCredentials());
     server_ = builder.BuildAndStart();
   }
@@ -69,10 +57,10 @@ class ProtoServerReflectionTest : public ::testing::Test {
   void ResetStub() {
     string target = "dns:localhost:" + to_string(port_);
     std::shared_ptr<Channel> channel =
-        CreateChannel(target, InsecureChannelCredentials());
+        grpc::CreateChannel(target, InsecureChannelCredentials());
     stub_ = grpc::testing::EchoTestService::NewStub(channel);
-    desc_db_.reset(new ProtoReflectionDescriptorDatabase(channel));
-    desc_pool_.reset(new protobuf::DescriptorPool(desc_db_.get()));
+    desc_db_ = absl::make_unique<ProtoReflectionDescriptorDatabase>(channel);
+    desc_pool_ = absl::make_unique<protobuf::DescriptorPool>(desc_db_.get());
   }
 
   string to_string(const int number) {
@@ -81,7 +69,7 @@ class ProtoServerReflectionTest : public ::testing::Test {
     return strs.str();
   }
 
-  void CompareService(const grpc::string& service) {
+  void CompareService(const std::string& service) {
     const protobuf::ServiceDescriptor* service_desc =
         desc_pool_->FindServiceByName(service);
     const protobuf::ServiceDescriptor* ref_service_desc =
@@ -103,7 +91,7 @@ class ProtoServerReflectionTest : public ::testing::Test {
     }
   }
 
-  void CompareMethod(const grpc::string& method) {
+  void CompareMethod(const std::string& method) {
     const protobuf::MethodDescriptor* method_desc =
         desc_pool_->FindMethodByName(method);
     const protobuf::MethodDescriptor* ref_method_desc =
@@ -116,7 +104,7 @@ class ProtoServerReflectionTest : public ::testing::Test {
     CompareType(method_desc->output_type()->full_name());
   }
 
-  void CompareType(const grpc::string& type) {
+  void CompareType(const std::string& type) {
     if (known_types_.find(type) != known_types_.end()) {
       return;
     }
@@ -144,10 +132,10 @@ class ProtoServerReflectionTest : public ::testing::Test {
 TEST_F(ProtoServerReflectionTest, CheckResponseWithLocalDescriptorPool) {
   ResetStub();
 
-  std::vector<grpc::string> services;
+  std::vector<std::string> services;
   desc_db_->GetServices(&services);
   // The service list has at least one service (reflection servcie).
-  EXPECT_TRUE(services.size() > 0);
+  EXPECT_TRUE(!services.empty());
 
   for (auto it = services.begin(); it != services.end(); ++it) {
     CompareService(*it);
@@ -158,7 +146,7 @@ TEST_F(ProtoServerReflectionTest, CheckResponseWithLocalDescriptorPool) {
 }  // namespace grpc
 
 int main(int argc, char** argv) {
-  grpc_test_init(argc, argv);
+  grpc::testing::TestEnvironment env(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

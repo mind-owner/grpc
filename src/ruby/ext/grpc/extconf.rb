@@ -1,80 +1,66 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 require 'etc'
 require 'mkmf'
 
-LIBDIR = RbConfig::CONFIG['libdir']
-INCLUDEDIR = RbConfig::CONFIG['includedir']
-
-HEADER_DIRS = [
-  # Search /opt/local (Mac source install)
-  '/opt/local/include',
-
-  # Search /usr/local (Source install)
-  '/usr/local/include',
-
-  # Check the ruby install locations
-  INCLUDEDIR
-]
-
-LIB_DIRS = [
-  # Search /opt/local (Mac source install)
-  '/opt/local/lib',
-
-  # Search /usr/local (Source install)
-  '/usr/local/lib',
-
-  # Check the ruby install locations
-  LIBDIR
-]
-
 windows = RUBY_PLATFORM =~ /mingw|mswin/
+bsd = RUBY_PLATFORM =~ /bsd/
+darwin = RUBY_PLATFORM =~ /darwin/
+linux = RUBY_PLATFORM =~ /linux/
+cross_compiling = ENV['RCD_HOST_RUBY_VERSION'] # set by rake-compiler-dock in build containers
 
 grpc_root = File.expand_path(File.join(File.dirname(__FILE__), '../../../..'))
 
 grpc_config = ENV['GRPC_CONFIG'] || 'opt'
 
-ENV['MACOSX_DEPLOYMENT_TARGET'] = '10.7'
+ENV['MACOSX_DEPLOYMENT_TARGET'] = '10.10'
 
-ENV['AR'] = RbConfig::CONFIG['AR'] + ' rcs'
-ENV['CC'] = RbConfig::CONFIG['CC']
-ENV['LD'] = ENV['CC']
+if ENV['AR'].nil? || ENV['AR'].size == 0
+    ENV['AR'] = RbConfig::CONFIG['AR']
+end
+if ENV['CC'].nil? || ENV['CC'].size == 0
+    ENV['CC'] = RbConfig::CONFIG['CC']
+end
+if ENV['CXX'].nil? || ENV['CXX'].size == 0
+    ENV['CXX'] = RbConfig::CONFIG['CXX']
+end
+if ENV['LD'].nil? || ENV['LD'].size == 0
+    ENV['LD'] = ENV['CC']
+end
 
-ENV['AR'] = 'libtool -o' if RUBY_PLATFORM =~ /darwin/
+if darwin && !cross_compiling
+  ENV['AR'] = 'libtool'
+  ENV['ARFLAGS'] = '-o'
+end
 
 ENV['EMBED_OPENSSL'] = 'true'
 ENV['EMBED_ZLIB'] = 'true'
 ENV['EMBED_CARES'] = 'true'
+
 ENV['ARCH_FLAGS'] = RbConfig::CONFIG['ARCH_FLAG']
-ENV['ARCH_FLAGS'] = '-arch i386 -arch x86_64' if RUBY_PLATFORM =~ /darwin/
-ENV['CFLAGS'] = '-DGPR_BACKWARDS_COMPATIBILITY_MODE'
+if darwin && !cross_compiling
+  if RUBY_PLATFORM =~ /arm64/
+    ENV['ARCH_FLAGS'] = '-arch arm64'
+  else
+    ENV['ARCH_FLAGS'] = '-arch i386 -arch x86_64'
+  end
+end
+
+ENV['CPPFLAGS'] = '-DGPR_BACKWARDS_COMPATIBILITY_MODE'
+ENV['CPPFLAGS'] += ' -DGRPC_XDS_USER_AGENT_NAME_SUFFIX="\"RUBY\"" '
+ENV['CPPFLAGS'] += ' -DGRPC_XDS_USER_AGENT_VERSION_SUFFIX="\"1.45.0.dev\"" '
 
 output_dir = File.expand_path(RbConfig::CONFIG['topdir'])
 grpc_lib_dir = File.join(output_dir, 'libs', grpc_config)
@@ -83,12 +69,25 @@ ENV['BUILDDIR'] = output_dir
 unless windows
   puts 'Building internal gRPC into ' + grpc_lib_dir
   nproc = 4
-  nproc = Etc.nprocessors * 2 if Etc.respond_to? :nprocessors
-  system("make -j#{nproc} -C #{grpc_root} #{grpc_lib_dir}/libgrpc.a CONFIG=#{grpc_config}")
+  nproc = Etc.nprocessors if Etc.respond_to? :nprocessors
+  nproc_override = ENV['GRPC_RUBY_BUILD_PROCS']
+  unless nproc_override.nil? or nproc_override.size == 0
+    nproc = nproc_override
+    puts "Overriding make parallelism to #{nproc}"
+  end
+  make = bsd ? 'gmake' : 'make'
+  cmd = "#{make} -j#{nproc} -C #{grpc_root} #{grpc_lib_dir}/libgrpc.a CONFIG=#{grpc_config} Q="
+  puts "Building grpc native library: #{cmd}"
+  system(cmd)
   exit 1 unless $? == 0
 end
 
 $CFLAGS << ' -I' + File.join(grpc_root, 'include')
+
+ext_export_file = File.join(grpc_root, 'src', 'ruby', 'ext', 'grpc', 'ext-export')
+$LDFLAGS << ' -Wl,--version-script="' + ext_export_file + '.gcc"' if linux
+$LDFLAGS << ' -Wl,-exported_symbols_list,"' + ext_export_file + '.clang"' if darwin
+
 $LDFLAGS << ' ' + File.join(grpc_lib_dir, 'libgrpc.a') unless windows
 if grpc_config == 'gcov'
   $CFLAGS << ' -O0 -fprofile-arcs -ftest-coverage'
@@ -96,24 +95,24 @@ if grpc_config == 'gcov'
 end
 
 if grpc_config == 'dbg'
-  $CFLAGS << ' -O0'
+  $CFLAGS << ' -O0 -ggdb3'
 end
 
-$LDFLAGS << ' -Wl,-wrap,memcpy' if RUBY_PLATFORM =~ /linux/
+$LDFLAGS << ' -Wl,-wrap,memcpy' if linux
+$LDFLAGS << ' -static-libgcc -static-libstdc++' if linux
 $LDFLAGS << ' -static' if windows
 
 $CFLAGS << ' -std=c99 '
 $CFLAGS << ' -Wall '
 $CFLAGS << ' -Wextra '
 $CFLAGS << ' -pedantic '
-$CFLAGS << ' -Wno-format '
 
 output = File.join('grpc', 'grpc_c')
 puts 'Generating Makefile for ' + output
 create_makefile(output)
 
 strip_tool = RbConfig::CONFIG['STRIP']
-strip_tool = 'strip -x' if RUBY_PLATFORM =~ /darwin/
+strip_tool += ' -x' if darwin
 
 if grpc_config == 'opt'
   File.open('Makefile.new', 'w') do |o|
@@ -123,7 +122,7 @@ if grpc_config == 'opt'
       o.puts i
     end
     o.puts
-    o.puts 'strip:'
+    o.puts 'strip: $(DLLIB)'
     o.puts "\t$(ECHO) Stripping $(DLLIB)"
     o.puts "\t$(Q) #{strip_tool} $(DLLIB)"
   end

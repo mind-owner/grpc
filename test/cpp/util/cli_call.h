@@ -1,33 +1,18 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
@@ -36,15 +21,19 @@
 
 #include <map>
 
-#include <grpc++/channel.h>
-#include <grpc++/completion_queue.h>
-#include <grpc++/generic/generic_stub.h>
-#include <grpc++/support/status.h>
-#include <grpc++/support/string_ref.h>
+#include <grpcpp/channel.h>
+#include <grpcpp/completion_queue.h>
+#include <grpcpp/generic/generic_stub.h>
+#include <grpcpp/support/status.h>
+#include <grpcpp/support/string_ref.h>
 
 namespace grpc {
 
 class ClientContext;
+
+struct CliArgs {
+  double timeout = -1;
+};
 
 namespace testing {
 
@@ -53,35 +42,37 @@ namespace testing {
 // and thread-unsafe methods should not be used together.
 class CliCall final {
  public:
-  typedef std::multimap<grpc::string, grpc::string> OutgoingMetadataContainer;
+  typedef std::multimap<std::string, std::string> OutgoingMetadataContainer;
   typedef std::multimap<grpc::string_ref, grpc::string_ref>
       IncomingMetadataContainer;
 
-  CliCall(std::shared_ptr<grpc::Channel> channel, const grpc::string& method,
-          const OutgoingMetadataContainer& metadata);
+  CliCall(const std::shared_ptr<grpc::Channel>& channel,
+          const std::string& method, const OutgoingMetadataContainer& metadata,
+          CliArgs args);
+  CliCall(const std::shared_ptr<grpc::Channel>& channel,
+          const std::string& method, const OutgoingMetadataContainer& metadata)
+      : CliCall(channel, method, metadata, CliArgs{}) {}
+
   ~CliCall();
 
   // Perform an unary generic RPC.
-  static Status Call(std::shared_ptr<grpc::Channel> channel,
-                     const grpc::string& method, const grpc::string& request,
-                     grpc::string* response,
-                     const OutgoingMetadataContainer& metadata,
-                     IncomingMetadataContainer* server_initial_metadata,
-                     IncomingMetadataContainer* server_trailing_metadata);
+  Status Call(const std::string& request, std::string* response,
+              IncomingMetadataContainer* server_initial_metadata,
+              IncomingMetadataContainer* server_trailing_metadata);
 
   // Send a generic request message in a synchronous manner. NOT thread-safe.
-  void Write(const grpc::string& request);
+  void Write(const std::string& request);
 
   // Send a generic request message in a synchronous manner. NOT thread-safe.
   void WritesDone();
 
   // Receive a generic response message in a synchronous manner.NOT thread-safe.
-  bool Read(grpc::string* response,
+  bool Read(std::string* response,
             IncomingMetadataContainer* server_initial_metadata);
 
   // Thread-safe write. Must be used with ReadAndMaybeNotifyWrite. Send out a
   // generic request message and wait for ReadAndMaybeNotifyWrite to finish it.
-  void WriteAndWait(const grpc::string& request);
+  void WriteAndWait(const std::string& request);
 
   // Thread-safe WritesDone. Must be used with ReadAndMaybeNotifyWrite. Send out
   // WritesDone for gereneric request messages and wait for
@@ -91,11 +82,13 @@ class CliCall final {
   // Thread-safe Read. Blockingly receive a generic response message. Notify
   // writes if they are finished when this read is waiting for a resposne.
   bool ReadAndMaybeNotifyWrite(
-      grpc::string* response,
+      std::string* response,
       IncomingMetadataContainer* server_initial_metadata);
 
   // Finish the RPC.
   Status Finish(IncomingMetadataContainer* server_trailing_metadata);
+
+  std::string peer() const { return ctx_.peer(); }
 
  private:
   std::unique_ptr<grpc::GenericStub> stub_;

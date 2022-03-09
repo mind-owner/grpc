@@ -1,125 +1,164 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 /* Microbenchmarks around CHTTP2 HPACK operations */
 
+#include <string.h>
+
+#include <memory>
+#include <sstream>
+
+#include <benchmark/benchmark.h>
+
+#include <grpc/slice.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
-#include <string.h>
-#include <sstream>
-extern "C" {
+
 #include "src/core/ext/transport/chttp2/transport/hpack_encoder.h"
 #include "src/core/ext/transport/chttp2/transport/hpack_parser.h"
+#include "src/core/lib/gprpp/time.h"
+#include "src/core/lib/resource_quota/resource_quota.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/slice/slice_string_helpers.h"
-#include "src/core/lib/transport/static_metadata.h"
-}
+#include "src/core/lib/transport/metadata_batch.h"
+#include "src/core/lib/transport/timeout_encoding.h"
+#include "test/core/util/test_config.h"
 #include "test/cpp/microbenchmarks/helpers.h"
-#include "third_party/benchmark/include/benchmark/benchmark.h"
+#include "test/cpp/util/test_config.h"
 
-auto &force_library_initialization = Library::get();
+static auto* g_memory_allocator = new grpc_core::MemoryAllocator(
+    grpc_core::ResourceQuota::Default()->memory_quota()->CreateMemoryAllocator(
+        "test"));
+
+static grpc_slice MakeSlice(const std::vector<uint8_t>& bytes) {
+  grpc_slice s = grpc_slice_malloc(bytes.size());
+  uint8_t* p = GRPC_SLICE_START_PTR(s);
+  for (auto b : bytes) {
+    *p++ = b;
+  }
+  return s;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // HPACK encoder
 //
 
-static void BM_HpackEncoderInitDestroy(benchmark::State &state) {
+static void BM_HpackEncoderInitDestroy(benchmark::State& state) {
   TrackCounters track_counters;
-  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
-  grpc_chttp2_hpack_compressor c;
-  while (state.KeepRunning()) {
-    grpc_chttp2_hpack_compressor_init(&c);
-    grpc_chttp2_hpack_compressor_destroy(&exec_ctx, &c);
-    grpc_exec_ctx_flush(&exec_ctx);
+  grpc_core::ExecCtx exec_ctx;
+  for (auto _ : state) {
+    grpc_core::HPackCompressor c;
+    grpc_core::ExecCtx::Get()->Flush();
   }
-  grpc_exec_ctx_finish(&exec_ctx);
+
   track_counters.Finish(state);
 }
 BENCHMARK(BM_HpackEncoderInitDestroy);
 
-template <class Fixture>
-static void BM_HpackEncoderEncodeHeader(benchmark::State &state) {
+static void BM_HpackEncoderEncodeDeadline(benchmark::State& state) {
   TrackCounters track_counters;
-  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
-  static bool logged_representative_output = false;
+  grpc_core::ExecCtx exec_ctx;
+  grpc_core::Timestamp saved_now = grpc_core::ExecCtx::Get()->Now();
 
-  grpc_metadata_batch b;
-  grpc_metadata_batch_init(&b);
-  std::vector<grpc_mdelem> elems = Fixture::GetElems(&exec_ctx);
-  std::vector<grpc_linked_mdelem> storage(elems.size());
-  for (size_t i = 0; i < elems.size(); i++) {
-    GPR_ASSERT(GRPC_LOG_IF_ERROR(
-        "addmd",
-        grpc_metadata_batch_add_tail(&exec_ctx, &b, &storage[i], elems[i])));
-  }
+  auto arena = grpc_core::MakeScopedArena(1024, g_memory_allocator);
+  grpc_metadata_batch b(arena.get());
+  b.Set(grpc_core::GrpcTimeoutMetadata(),
+        saved_now + grpc_core::Duration::Seconds(30));
 
-  grpc_chttp2_hpack_compressor c;
-  grpc_chttp2_hpack_compressor_init(&c);
+  grpc_core::HPackCompressor c;
   grpc_transport_one_way_stats stats;
-  memset(&stats, 0, sizeof(stats));
+  stats = {};
   grpc_slice_buffer outbuf;
   grpc_slice_buffer_init(&outbuf);
   while (state.KeepRunning()) {
-    grpc_encode_header_options hopt = {
-        static_cast<uint32_t>(state.iterations()),
-        state.range(0) != 0,
-        Fixture::kEnableTrueBinary,
-        (size_t)state.range(1),
-        &stats,
-    };
-    grpc_chttp2_encode_header(&exec_ctx, &c, &b, &hopt, &outbuf);
+    c.EncodeHeaders(
+        grpc_core::HPackCompressor::EncodeHeaderOptions{
+            static_cast<uint32_t>(state.iterations()),
+            true,
+            false,
+            static_cast<size_t>(1024),
+            &stats,
+        },
+        b, &outbuf);
+    grpc_slice_buffer_reset_and_unref_internal(&outbuf);
+    grpc_core::ExecCtx::Get()->Flush();
+  }
+  grpc_slice_buffer_destroy_internal(&outbuf);
+
+  std::ostringstream label;
+  label << "framing_bytes/iter:"
+        << (static_cast<double>(stats.framing_bytes) /
+            static_cast<double>(state.iterations()))
+        << " header_bytes/iter:"
+        << (static_cast<double>(stats.header_bytes) /
+            static_cast<double>(state.iterations()));
+  track_counters.AddLabel(label.str());
+  track_counters.Finish(state);
+}
+BENCHMARK(BM_HpackEncoderEncodeDeadline);
+
+template <class Fixture>
+static void BM_HpackEncoderEncodeHeader(benchmark::State& state) {
+  TrackCounters track_counters;
+  grpc_core::ExecCtx exec_ctx;
+  static bool logged_representative_output = false;
+
+  auto arena = grpc_core::MakeScopedArena(1024, g_memory_allocator);
+  grpc_metadata_batch b(arena.get());
+  Fixture::Prepare(&b);
+
+  grpc_core::HPackCompressor c;
+  grpc_transport_one_way_stats stats;
+  stats = {};
+  grpc_slice_buffer outbuf;
+  grpc_slice_buffer_init(&outbuf);
+  while (state.KeepRunning()) {
+    static constexpr int kEnsureMaxFrameAtLeast = 2;
+    c.EncodeHeaders(
+        grpc_core::HPackCompressor::EncodeHeaderOptions{
+            static_cast<uint32_t>(state.iterations()),
+            state.range(0) != 0,
+            Fixture::kEnableTrueBinary,
+            static_cast<size_t>(state.range(1) + kEnsureMaxFrameAtLeast),
+            &stats,
+        },
+        b, &outbuf);
     if (!logged_representative_output && state.iterations() > 3) {
       logged_representative_output = true;
       for (size_t i = 0; i < outbuf.count; i++) {
-        char *s = grpc_dump_slice(outbuf.slices[i], GPR_DUMP_HEX);
+        char* s = grpc_dump_slice(outbuf.slices[i], GPR_DUMP_HEX);
         gpr_log(GPR_DEBUG, "%" PRIdPTR ": %s", i, s);
         gpr_free(s);
       }
     }
-    grpc_slice_buffer_reset_and_unref_internal(&exec_ctx, &outbuf);
-    grpc_exec_ctx_flush(&exec_ctx);
+    grpc_slice_buffer_reset_and_unref_internal(&outbuf);
+    grpc_core::ExecCtx::Get()->Flush();
   }
-  grpc_metadata_batch_destroy(&exec_ctx, &b);
-  grpc_chttp2_hpack_compressor_destroy(&exec_ctx, &c);
-  grpc_slice_buffer_destroy_internal(&exec_ctx, &outbuf);
-  grpc_exec_ctx_finish(&exec_ctx);
+  grpc_slice_buffer_destroy_internal(&outbuf);
 
   std::ostringstream label;
-  label << "framing_bytes/iter:" << (static_cast<double>(stats.framing_bytes) /
-                                     static_cast<double>(state.iterations()))
-        << " header_bytes/iter:" << (static_cast<double>(stats.header_bytes) /
-                                     static_cast<double>(state.iterations()));
-  state.SetLabel(label.str());
+  label << "framing_bytes/iter:"
+        << (static_cast<double>(stats.framing_bytes) /
+            static_cast<double>(state.iterations()))
+        << " header_bytes/iter:"
+        << (static_cast<double>(stats.header_bytes) /
+            static_cast<double>(state.iterations()));
+  track_counters.AddLabel(label.str());
   track_counters.Finish(state);
 }
 
@@ -128,128 +167,141 @@ namespace hpack_encoder_fixtures {
 class EmptyBatch {
  public:
   static constexpr bool kEnableTrueBinary = false;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {};
-  }
+  static void Prepare(grpc_metadata_batch*) {}
 };
 
 class SingleStaticElem {
  public:
   static constexpr bool kEnableTrueBinary = false;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {GRPC_MDELEM_GRPC_ACCEPT_ENCODING_IDENTITY_COMMA_DEFLATE};
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Set(grpc_core::GrpcAcceptEncodingMetadata(),
+           grpc_core::CompressionAlgorithmSet(
+               {GRPC_COMPRESS_NONE, GRPC_COMPRESS_DEFLATE}));
   }
 };
 
-class SingleInternedElem {
+static void CrashOnAppendError(absl::string_view, const grpc_core::Slice&) {
+  abort();
+}
+
+class SingleNonBinaryElem {
  public:
   static constexpr bool kEnableTrueBinary = false;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {grpc_mdelem_from_slices(
-        exec_ctx, grpc_slice_intern(grpc_slice_from_static_string("abc")),
-        grpc_slice_intern(grpc_slice_from_static_string("def")))};
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Append("abc", grpc_core::Slice::FromStaticString("def"),
+              CrashOnAppendError);
   }
 };
 
 template <int kLength, bool kTrueBinary>
-class SingleInternedBinaryElem {
+class SingleBinaryElem {
  public:
   static constexpr bool kEnableTrueBinary = kTrueBinary;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    grpc_slice bytes = MakeBytes();
-    std::vector<grpc_mdelem> out = {grpc_mdelem_from_slices(
-        exec_ctx, grpc_slice_intern(grpc_slice_from_static_string("abc-bin")),
-        grpc_slice_intern(bytes))};
-    grpc_slice_unref(bytes);
-    return out;
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Append("abc-bin", MakeBytes(), CrashOnAppendError);
   }
 
  private:
-  static grpc_slice MakeBytes() {
+  static grpc_core::Slice MakeBytes() {
     std::vector<char> v;
+    v.reserve(kLength);
     for (int i = 0; i < kLength; i++) {
       v.push_back(static_cast<char>(rand()));
     }
-    return grpc_slice_from_copied_buffer(v.data(), v.size());
-  }
-};
-
-class SingleInternedKeyElem {
- public:
-  static constexpr bool kEnableTrueBinary = false;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {grpc_mdelem_from_slices(
-        exec_ctx, grpc_slice_intern(grpc_slice_from_static_string("abc")),
-        grpc_slice_from_static_string("def"))};
-  }
-};
-
-class SingleNonInternedElem {
- public:
-  static constexpr bool kEnableTrueBinary = false;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {grpc_mdelem_from_slices(exec_ctx,
-                                    grpc_slice_from_static_string("abc"),
-                                    grpc_slice_from_static_string("def"))};
-  }
-};
-
-template <int kLength, bool kTrueBinary>
-class SingleNonInternedBinaryElem {
- public:
-  static constexpr bool kEnableTrueBinary = kTrueBinary;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {grpc_mdelem_from_slices(
-        exec_ctx, grpc_slice_from_static_string("abc-bin"), MakeBytes())};
-  }
-
- private:
-  static grpc_slice MakeBytes() {
-    std::vector<char> v;
-    for (int i = 0; i < kLength; i++) {
-      v.push_back(static_cast<char>(rand()));
-    }
-    return grpc_slice_from_copied_buffer(v.data(), v.size());
+    return grpc_core::Slice::FromCopiedBuffer(v);
   }
 };
 
 class RepresentativeClientInitialMetadata {
  public:
   static constexpr bool kEnableTrueBinary = true;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {
-        GRPC_MDELEM_SCHEME_HTTP, GRPC_MDELEM_METHOD_POST,
-        grpc_mdelem_from_slices(
-            exec_ctx, GRPC_MDSTR_PATH,
-            grpc_slice_intern(grpc_slice_from_static_string("/foo/bar"))),
-        grpc_mdelem_from_slices(exec_ctx, GRPC_MDSTR_AUTHORITY,
-                                grpc_slice_intern(grpc_slice_from_static_string(
-                                    "foo.test.google.fr:1234"))),
-        GRPC_MDELEM_GRPC_ACCEPT_ENCODING_IDENTITY_COMMA_DEFLATE_COMMA_GZIP,
-        GRPC_MDELEM_TE_TRAILERS,
-        GRPC_MDELEM_CONTENT_TYPE_APPLICATION_SLASH_GRPC,
-        grpc_mdelem_from_slices(
-            exec_ctx, GRPC_MDSTR_USER_AGENT,
-            grpc_slice_intern(grpc_slice_from_static_string(
-                "grpc-c/3.0.0-dev (linux; chttp2; green)")))};
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Set(grpc_core::HttpSchemeMetadata(),
+           grpc_core::HttpSchemeMetadata::kHttp);
+    b->Set(grpc_core::HttpMethodMetadata(),
+           grpc_core::HttpMethodMetadata::kPost);
+    b->Set(
+        grpc_core::HttpPathMetadata(),
+        grpc_core::Slice(grpc_core::StaticSlice::FromStaticString("/foo/bar")));
+    b->Set(grpc_core::HttpAuthorityMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "foo.test.google.fr:1234")));
+    b->Set(
+        grpc_core::GrpcAcceptEncodingMetadata(),
+        grpc_core::CompressionAlgorithmSet(
+            {GRPC_COMPRESS_NONE, GRPC_COMPRESS_DEFLATE, GRPC_COMPRESS_GZIP}));
+    b->Set(grpc_core::TeMetadata(), grpc_core::TeMetadata::kTrailers);
+    b->Set(grpc_core::ContentTypeMetadata(),
+           grpc_core::ContentTypeMetadata::kApplicationGrpc);
+    b->Set(grpc_core::UserAgentMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "grpc-c/3.0.0-dev (linux; chttp2; green)")));
+  }
+};
+
+// This fixture reflects how initial metadata are sent by a production client,
+// with non-indexed :path and binary headers. The metadata here are the same as
+// the corresponding parser benchmark below.
+class MoreRepresentativeClientInitialMetadata {
+ public:
+  static constexpr bool kEnableTrueBinary = true;
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Set(grpc_core::HttpSchemeMetadata(),
+           grpc_core::HttpSchemeMetadata::kHttp);
+    b->Set(grpc_core::HttpMethodMetadata(),
+           grpc_core::HttpMethodMetadata::kPost);
+    b->Set(grpc_core::HttpPathMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "/grpc.test.FooService/BarMethod")));
+    b->Set(grpc_core::HttpAuthorityMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "foo.test.google.fr:1234")));
+    b->Set(grpc_core::GrpcTraceBinMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+               "\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+               "\x10\x11\x12\x13\x14\x15\x16\x17\x18"
+               "\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+               "\x20\x21\x22\x23\x24\x25\x26\x27\x28"
+               "\x29\x2a\x2b\x2c\x2d\x2e\x2f"
+               "\x30")));
+    b->Set(grpc_core::GrpcTagsBinMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "\x00\x01\x02\x03\x04\x05\x06\x07\x08"
+               "\x09\x0a\x0b\x0c\x0d\x0e\x0f"
+               "\x10\x11\x12\x13")));
+    b->Set(
+        grpc_core::GrpcAcceptEncodingMetadata(),
+        grpc_core::CompressionAlgorithmSet(
+            {GRPC_COMPRESS_NONE, GRPC_COMPRESS_DEFLATE, GRPC_COMPRESS_GZIP}));
+    b->Set(grpc_core::TeMetadata(), grpc_core::TeMetadata::kTrailers);
+    b->Set(grpc_core::ContentTypeMetadata(),
+           grpc_core::ContentTypeMetadata::kApplicationGrpc);
+    b->Set(grpc_core::UserAgentMetadata(),
+           grpc_core::Slice(grpc_core::StaticSlice::FromStaticString(
+               "grpc-c/3.0.0-dev (linux; chttp2; green)")));
   }
 };
 
 class RepresentativeServerInitialMetadata {
  public:
   static constexpr bool kEnableTrueBinary = true;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {GRPC_MDELEM_STATUS_200,
-            GRPC_MDELEM_CONTENT_TYPE_APPLICATION_SLASH_GRPC,
-            GRPC_MDELEM_GRPC_ACCEPT_ENCODING_IDENTITY_COMMA_DEFLATE_COMMA_GZIP};
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Set(grpc_core::HttpStatusMetadata(), 200);
+    b->Set(grpc_core::ContentTypeMetadata(),
+           grpc_core::ContentTypeMetadata::kApplicationGrpc);
+    b->Set(
+        grpc_core::GrpcAcceptEncodingMetadata(),
+        grpc_core::CompressionAlgorithmSet(
+            {GRPC_COMPRESS_NONE, GRPC_COMPRESS_DEFLATE, GRPC_COMPRESS_GZIP}));
   }
 };
 
 class RepresentativeServerTrailingMetadata {
  public:
   static constexpr bool kEnableTrueBinary = true;
-  static std::vector<grpc_mdelem> GetElems(grpc_exec_ctx *exec_ctx) {
-    return {GRPC_MDELEM_GRPC_STATUS_0};
+  static void Prepare(grpc_metadata_batch* b) {
+    b->Set(grpc_core::GrpcStatusMetadata(), GRPC_STATUS_OK);
   }
 };
 
@@ -258,78 +310,27 @@ BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, EmptyBatch)->Args({0, 16384});
 BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, EmptyBatch)->Args({1, 16384});
 BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleStaticElem)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleInternedKeyElem)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleNonBinaryElem)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleInternedElem)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleBinaryElem<1, false>)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<1, false>)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleBinaryElem<3, false>)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<3, false>)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleBinaryElem<10, false>)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<10, false>)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleBinaryElem<31, false>)
     ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<31, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<100, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<1, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<3, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<10, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<31, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleInternedBinaryElem<100, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleNonInternedElem)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<1, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<3, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<10, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<31, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<100, false>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<1, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<3, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<10, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<31, true>)
-    ->Args({0, 16384});
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
-                   SingleNonInternedBinaryElem<100, true>)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleBinaryElem<100, false>)
     ->Args({0, 16384});
 // test with a tiny frame size, to highlight continuation costs
-BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleNonInternedElem)
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader, SingleNonBinaryElem)
     ->Args({0, 1});
 
 BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
                    RepresentativeClientInitialMetadata)
+    ->Args({0, 16384});
+BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
+                   MoreRepresentativeClientInitialMetadata)
     ->Args({0, 16384});
 BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
                    RepresentativeServerInitialMetadata)
@@ -344,61 +345,119 @@ BENCHMARK_TEMPLATE(BM_HpackEncoderEncodeHeader,
 // HPACK parser
 //
 
-static void BM_HpackParserInitDestroy(benchmark::State &state) {
+static void BM_HpackParserInitDestroy(benchmark::State& state) {
   TrackCounters track_counters;
-  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
-  grpc_chttp2_hpack_parser p;
-  while (state.KeepRunning()) {
-    grpc_chttp2_hpack_parser_init(&exec_ctx, &p);
-    grpc_chttp2_hpack_parser_destroy(&exec_ctx, &p);
-    grpc_exec_ctx_flush(&exec_ctx);
+  grpc_core::ExecCtx exec_ctx;
+  for (auto _ : state) {
+    { grpc_core::HPackParser(); }
+    grpc_core::ExecCtx::Get()->Flush();
   }
-  grpc_exec_ctx_finish(&exec_ctx);
+
   track_counters.Finish(state);
 }
 BENCHMARK(BM_HpackParserInitDestroy);
 
-static void UnrefHeader(grpc_exec_ctx *exec_ctx, void *user_data,
-                        grpc_mdelem md) {
-  GRPC_MDELEM_UNREF(exec_ctx, md);
-}
-
 template <class Fixture>
-static void BM_HpackParserParseHeader(benchmark::State &state) {
+static void BM_HpackParserParseHeader(benchmark::State& state) {
   TrackCounters track_counters;
-  grpc_exec_ctx exec_ctx = GRPC_EXEC_CTX_INIT;
   std::vector<grpc_slice> init_slices = Fixture::GetInitSlices();
   std::vector<grpc_slice> benchmark_slices = Fixture::GetBenchmarkSlices();
-  grpc_chttp2_hpack_parser p;
-  grpc_chttp2_hpack_parser_init(&exec_ctx, &p);
-  p.on_header = UnrefHeader;
-  p.on_header_user_data = nullptr;
-  for (auto slice : init_slices) {
-    grpc_chttp2_hpack_parser_parse(&exec_ctx, &p, slice);
-  }
-  while (state.KeepRunning()) {
-    for (auto slice : benchmark_slices) {
-      grpc_chttp2_hpack_parser_parse(&exec_ctx, &p, slice);
+  grpc_core::ExecCtx exec_ctx;
+  grpc_core::HPackParser p;
+  const int kArenaSize = 4096 * 4096;
+  auto* arena = grpc_core::Arena::Create(kArenaSize, g_memory_allocator);
+  grpc_core::ManualConstructor<grpc_metadata_batch> b;
+  b.Init(arena);
+  p.BeginFrame(&*b, std::numeric_limits<uint32_t>::max(),
+               grpc_core::HPackParser::Boundary::None,
+               grpc_core::HPackParser::Priority::None,
+               grpc_core::HPackParser::LogInfo{
+                   1, grpc_core::HPackParser::LogInfo::kHeaders, false});
+  auto parse_vec = [&p](const std::vector<grpc_slice>& slices) {
+    for (size_t i = 0; i < slices.size(); ++i) {
+      auto error = p.Parse(slices[i], i == slices.size() - 1);
+      GPR_ASSERT(error == GRPC_ERROR_NONE);
     }
-    grpc_exec_ctx_flush(&exec_ctx);
+  };
+  parse_vec(init_slices);
+  while (state.KeepRunning()) {
+    b->Clear();
+    parse_vec(benchmark_slices);
+    grpc_core::ExecCtx::Get()->Flush();
+    // Recreate arena every 4k iterations to avoid oom
+    if (0 == (state.iterations() & 0xfff)) {
+      b.Destroy();
+      arena->Destroy();
+      arena = grpc_core::Arena::Create(kArenaSize, g_memory_allocator);
+      b.Init(arena);
+      p.BeginFrame(&*b, std::numeric_limits<uint32_t>::max(),
+                   grpc_core::HPackParser::Boundary::None,
+                   grpc_core::HPackParser::Priority::None,
+                   grpc_core::HPackParser::LogInfo{
+                       1, grpc_core::HPackParser::LogInfo::kHeaders, false});
+    }
   }
+  // Clean up
+  b.Destroy();
   for (auto slice : init_slices) grpc_slice_unref(slice);
   for (auto slice : benchmark_slices) grpc_slice_unref(slice);
-  grpc_chttp2_hpack_parser_destroy(&exec_ctx, &p);
-  grpc_exec_ctx_finish(&exec_ctx);
+  arena->Destroy();
+
   track_counters.Finish(state);
 }
 
 namespace hpack_parser_fixtures {
 
-static grpc_slice MakeSlice(std::vector<uint8_t> bytes) {
-  grpc_slice s = grpc_slice_malloc(bytes.size());
-  uint8_t *p = GRPC_SLICE_START_PTR(s);
-  for (auto b : bytes) {
-    *p++ = b;
+template <class EncoderFixture>
+class FromEncoderFixture {
+ public:
+  static std::vector<grpc_slice> GetInitSlices() { return Generate(0); }
+  static std::vector<grpc_slice> GetBenchmarkSlices() { return Generate(1); }
+
+ private:
+  static std::vector<grpc_slice> Generate(int iteration) {
+    grpc_core::ExecCtx exec_ctx;
+
+    auto arena = grpc_core::MakeScopedArena(1024, g_memory_allocator);
+    grpc_metadata_batch b(arena.get());
+    EncoderFixture::Prepare(&b);
+
+    grpc_core::HPackCompressor c;
+    grpc_transport_one_way_stats stats;
+    std::vector<grpc_slice> out;
+    stats = {};
+    bool done = false;
+    int i = 0;
+    while (!done) {
+      grpc_slice_buffer outbuf;
+      grpc_slice_buffer_init(&outbuf);
+      c.EncodeHeaders(
+          grpc_core::HPackCompressor::EncodeHeaderOptions{
+              static_cast<uint32_t>(i),
+              false,
+              EncoderFixture::kEnableTrueBinary,
+              1024 * 1024,
+              &stats,
+          },
+          b, &outbuf);
+      if (i == iteration) {
+        for (size_t s = 0; s < outbuf.count; s++) {
+          out.push_back(grpc_slice_ref_internal(outbuf.slices[s]));
+        }
+        done = true;
+      }
+      grpc_slice_buffer_reset_and_unref_internal(&outbuf);
+      grpc_core::ExecCtx::Get()->Flush();
+      grpc_slice_buffer_destroy_internal(&outbuf);
+      i++;
+    }
+    // Remove the HTTP header.
+    GPR_ASSERT(!out.empty());
+    GPR_ASSERT(GRPC_SLICE_LENGTH(out[0]) > 9);
+    out[0] = grpc_slice_sub_no_ref(out[0], 9, GRPC_SLICE_LENGTH(out[0]));
+    return out;
   }
-  return s;
-}
+};
 
 class EmptyBatch {
  public:
@@ -435,7 +494,7 @@ class KeyIndexedSingleStaticElem {
         {0x40, 0x07, ':', 's', 't', 'a', 't', 'u', 's', 0x03, '2', '0', '0'})};
   }
   static std::vector<grpc_slice> GetBenchmarkSlices() {
-    return {MakeSlice({0x7e, 0x03, 'd', 'e', 'f'})};
+    return {MakeSlice({0x7e, 0x03, '4', '0', '4'})};
   }
 };
 
@@ -557,86 +616,26 @@ class NonIndexedBinaryElem<100, false> {
   }
 };
 
-class RepresentativeClientInitialMetadata {
- public:
-  static std::vector<grpc_slice> GetInitSlices() {
-    return {grpc_slice_from_static_string(
-        // generated with:
-        // ```
-        // tools/codegen/core/gen_header_frame.py --compression inc --no_framing
-        // < test/core/bad_client/tests/simple_request.headers
-        // ```
-        "@\x05:path\x08/foo/bar"
-        "@\x07:scheme\x04http"
-        "@\x07:method\x04POST"
-        "@\x0a:authority\x09localhost"
-        "@\x0c"
-        "content-type\x10"
-        "application/grpc"
-        "@\x14grpc-accept-encoding\x15identity,deflate,gzip"
-        "@\x02te\x08trailers"
-        "@\x0auser-agent\"bad-client grpc-c/0.12.0.0 (linux)")};
-  }
-  static std::vector<grpc_slice> GetBenchmarkSlices() {
-    // generated with:
-    // ```
-    // tools/codegen/core/gen_header_frame.py --compression pre --no_framing
-    // --hex < test/core/bad_client/tests/simple_request.headers
-    // ```
-    return {MakeSlice({0xc5, 0xc4, 0xc3, 0xc2, 0xc1, 0xc0, 0xbf, 0xbe})};
-  }
-};
+using RepresentativeClientInitialMetadata = FromEncoderFixture<
+    hpack_encoder_fixtures::RepresentativeClientInitialMetadata>;
+using RepresentativeServerInitialMetadata = FromEncoderFixture<
+    hpack_encoder_fixtures::RepresentativeServerInitialMetadata>;
+using RepresentativeServerTrailingMetadata = FromEncoderFixture<
+    hpack_encoder_fixtures::RepresentativeServerTrailingMetadata>;
+using MoreRepresentativeClientInitialMetadata = FromEncoderFixture<
+    hpack_encoder_fixtures::MoreRepresentativeClientInitialMetadata>;
 
-class RepresentativeServerInitialMetadata {
+// Send the same deadline repeatedly
+class SameDeadline {
  public:
   static std::vector<grpc_slice> GetInitSlices() {
-    return {grpc_slice_from_static_string(
-        // generated with:
-        // ```
-        // tools/codegen/core/gen_header_frame.py --compression inc --no_framing
-        // <
-        // test/cpp/microbenchmarks/representative_server_initial_metadata.headers
-        // ```
-        "@\x07:status\x03"
-        "200"
-        "@\x0c"
-        "content-type\x10"
-        "application/grpc"
-        "@\x14grpc-accept-encoding\x15identity,deflate,gzip")};
+    return {
+        grpc_slice_from_static_string("@\x0cgrpc-timeout\x03"
+                                      "30S")};
   }
   static std::vector<grpc_slice> GetBenchmarkSlices() {
-    // generated with:
-    // ```
-    // tools/codegen/core/gen_header_frame.py --compression pre --no_framing
-    // --hex <
-    // test/cpp/microbenchmarks/representative_server_initial_metadata.headers
-    // ```
-    return {MakeSlice({0xc0, 0xbf, 0xbe})};
-  }
-};
-
-class RepresentativeServerTrailingMetadata {
- public:
-  static std::vector<grpc_slice> GetInitSlices() {
-    return {grpc_slice_from_static_string(
-        // generated with:
-        // ```
-        // tools/codegen/core/gen_header_frame.py --compression inc --no_framing
-        // <
-        // test/cpp/microbenchmarks/representative_server_trailing_metadata.headers
-        // ```
-        "@\x0bgrpc-status\x01"
-        "0"
-        "@\x0cgrpc-message\x00")};
-  }
-  static std::vector<grpc_slice> GetBenchmarkSlices() {
-    // generated with:
-    // ```
-    // tools/codegen/core/gen_header_frame.py --compression pre --no_framing
-    // --hex <
-    // test/cpp/microbenchmarks/representative_server_trailing_metadata.headers
-    // ```
-    return {MakeSlice({0xbf, 0xbe})};
+    // Use saved key and literal value.
+    return {MakeSlice({0x0f, 0x2f, 0x03, '3', '0', 'S'})};
   }
 };
 
@@ -661,10 +660,32 @@ BENCHMARK_TEMPLATE(BM_HpackParserParseHeader, NonIndexedBinaryElem<100, true>);
 BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
                    RepresentativeClientInitialMetadata);
 BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
+                   MoreRepresentativeClientInitialMetadata);
+BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
                    RepresentativeServerInitialMetadata);
 BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
                    RepresentativeServerTrailingMetadata);
+BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
+                   RepresentativeClientInitialMetadata);
+BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
+                   MoreRepresentativeClientInitialMetadata);
+BENCHMARK_TEMPLATE(BM_HpackParserParseHeader,
+                   RepresentativeServerInitialMetadata);
+BENCHMARK_TEMPLATE(BM_HpackParserParseHeader, SameDeadline);
 
 }  // namespace hpack_parser_fixtures
 
-BENCHMARK_MAIN();
+// Some distros have RunSpecifiedBenchmarks under the benchmark namespace,
+// and others do not. This allows us to support both modes.
+namespace benchmark {
+void RunTheBenchmarksNamespaced() { RunSpecifiedBenchmarks(); }
+}  // namespace benchmark
+
+int main(int argc, char** argv) {
+  grpc::testing::TestEnvironment env(argc, argv);
+  LibraryInitializer libInit;
+  ::benchmark::Initialize(&argc, argv);
+  grpc::testing::InitTest(&argc, &argv, false);
+  benchmark::RunTheBenchmarksNamespaced();
+  return 0;
+}

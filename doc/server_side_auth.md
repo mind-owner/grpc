@@ -2,6 +2,7 @@ Server-side API for Authenticating Clients
 ==========================================
 
 NOTE: This document describes how server-side authentication works in C-core based gRPC implementations only. In gRPC Java and Go, server side authentication is handled differently.
+NOTE2: `CallCredentials` class is only valid for secure channels in C-Core. So, for connections under insecure channels, features below might not be available.
 
 ## AuthContext
 
@@ -13,7 +14,7 @@ The contents of the *auth properties* are populated by an *auth interceptor*. Th
 
 WARNING: AuthContext is the only reliable source of truth when it comes to authenticating RPCs. Using any other call/context properties for authentication purposes is wrong and inherently unsafe.
 
-####Example AuthContext contents
+#### Example AuthContext contents
 
 For secure channel using mutual TLS authentication with both client and server certificates (test certificates from this repository are used).
 
@@ -45,7 +46,7 @@ gRPC comes with some basic "interceptors" already built-in.
 WARNING: While there is a public API that allows anyone to write their own custom interceptor, please think twice before using it.
 There are legitimate uses for custom interceptors but you should keep in mind that as auth interceptors essentially decide which RPCs are authenticated and which are not, their code is very sensitive from the security perspective and getting things wrong might have serious consequences. If unsure, we strongly recommend to rely on official & proven interceptors that come with gRPC.
 
-####Available auth interceptors
+#### Available auth interceptors
 - TLS/SSL certificate authentication (built into gRPC's security layer, automatically used whenever you use a secure connection)
 - (coming soon) JWT auth token authentication
 - more will be added over time

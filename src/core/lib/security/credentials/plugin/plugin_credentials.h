@@ -1,45 +1,99 @@
 /*
  *
- * Copyright 2016, Google Inc.
- * All rights reserved.
+ * Copyright 2016 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #ifndef GRPC_CORE_LIB_SECURITY_CREDENTIALS_PLUGIN_PLUGIN_CREDENTIALS_H
 #define GRPC_CORE_LIB_SECURITY_CREDENTIALS_PLUGIN_PLUGIN_CREDENTIALS_H
 
+#include <grpc/support/port_platform.h>
+
+#include "src/core/lib/security/credentials/call_creds_util.h"
 #include "src/core/lib/security/credentials/credentials.h"
 
-typedef struct {
-  grpc_call_credentials base;
-  grpc_metadata_credentials_plugin plugin;
-  grpc_credentials_md_store *plugin_md;
-} grpc_plugin_credentials;
+extern grpc_core::TraceFlag grpc_plugin_credentials_trace;
+
+// This type is forward declared as a C struct and we cannot define it as a
+// class. Otherwise, compiler will complain about type mismatch due to
+// -Wmismatched-tags.
+struct grpc_plugin_credentials final : public grpc_call_credentials {
+ public:
+  explicit grpc_plugin_credentials(grpc_metadata_credentials_plugin plugin,
+                                   grpc_security_level min_security_level);
+  ~grpc_plugin_credentials() override;
+
+  grpc_core::ArenaPromise<absl::StatusOr<grpc_core::ClientInitialMetadata>>
+  GetRequestMetadata(grpc_core::ClientInitialMetadata initial_metadata,
+                     const GetRequestMetadataArgs* args) override;
+
+  std::string debug_string() override;
+
+ private:
+  class PendingRequest : public grpc_core::RefCounted<PendingRequest> {
+   public:
+    PendingRequest(grpc_core::RefCountedPtr<grpc_plugin_credentials> creds,
+                   grpc_core::ClientInitialMetadata initial_metadata,
+                   const grpc_call_credentials::GetRequestMetadataArgs* args)
+        : call_creds_(std::move(creds)),
+          context_(
+              grpc_core::MakePluginAuthMetadataContext(initial_metadata, args)),
+          md_(std::move(initial_metadata)) {}
+
+    ~PendingRequest() override {
+      grpc_auth_metadata_context_reset(&context_);
+      for (size_t i = 0; i < metadata_.size(); i++) {
+        grpc_slice_unref_internal(metadata_[i].key);
+        grpc_slice_unref_internal(metadata_[i].value);
+      }
+    }
+
+    absl::StatusOr<grpc_core::ClientInitialMetadata> ProcessPluginResult(
+        const grpc_metadata* md, size_t num_md, grpc_status_code status,
+        const char* error_details);
+
+    grpc_core::Poll<absl::StatusOr<grpc_core::ClientInitialMetadata>>
+    PollAsyncResult();
+
+    static void RequestMetadataReady(void* request, const grpc_metadata* md,
+                                     size_t num_md, grpc_status_code status,
+                                     const char* error_details);
+
+    grpc_auth_metadata_context context() const { return context_; }
+    grpc_plugin_credentials* creds() const { return call_creds_.get(); }
+
+   private:
+    std::atomic<bool> ready_{false};
+    grpc_core::Waker waker_{
+        grpc_core::Activity::current()->MakeNonOwningWaker()};
+    grpc_core::RefCountedPtr<grpc_plugin_credentials> call_creds_;
+    grpc_auth_metadata_context context_;
+    grpc_core::ClientInitialMetadata md_;
+    // final status
+    absl::InlinedVector<grpc_metadata, 2> metadata_;
+    std::string error_details_;
+    grpc_status_code status_;
+  };
+
+  int cmp_impl(const grpc_call_credentials* other) const override {
+    // TODO(yashykt): Check if we can do something better here
+    return grpc_core::QsortCompare(
+        static_cast<const grpc_call_credentials*>(this), other);
+  }
+
+  grpc_metadata_credentials_plugin plugin_;
+};
 
 #endif /* GRPC_CORE_LIB_SECURITY_CREDENTIALS_PLUGIN_PLUGIN_CREDENTIALS_H */

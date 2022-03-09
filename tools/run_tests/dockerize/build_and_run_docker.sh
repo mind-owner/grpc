@@ -1,92 +1,103 @@
 #!/bin/bash
-# Copyright 2016, Google Inc.
-# All rights reserved.
+# Copyright 2016 The gRPC Authors
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
-# Builds docker image and runs a command under it.
-# You should never need to call this script on your own.
+# This script is invoked by run_tests.py to accommodate "test under docker"
+# scenario. You should never need to call this script on your own.
+
+# shellcheck disable=SC2103
 
 set -ex
 
-cd $(dirname $0)/../../..
+cd "$(dirname "$0")/../../.."
 git_root=$(pwd)
 cd -
 
 # Inputs
 # DOCKERFILE_DIR - Directory in which Dockerfile file is located.
 # DOCKER_RUN_SCRIPT - Script to run under docker (relative to grpc repo root)
-# OUTPUT_DIR - Directory that will be copied from inside docker after finishing.
+# OUTPUT_DIR - Directory (relatively to git repo root) that will be copied from inside docker container after finishing.
 # DOCKERHUB_ORGANIZATION - If set, pull a prebuilt image from given dockerhub org.
-# DOCKER_BASE_IMAGE - If set, pull the latest base image.
-# $@ - Extra args to pass to docker run
+# $@ - Extra args to pass to the "docker run" command.
 
 # Use image name based on Dockerfile location checksum
-DOCKER_IMAGE_NAME=$(basename $DOCKERFILE_DIR)_$(sha1sum $DOCKERFILE_DIR/Dockerfile | cut -f1 -d\ )
-
-# Pull the base image to force an update
-if [ "$DOCKER_BASE_IMAGE" != "" ]
-then
-  docker pull $DOCKER_BASE_IMAGE
-fi
+DOCKER_IMAGE_NAME=$(basename "$DOCKERFILE_DIR"):$(sha1sum "$DOCKERFILE_DIR/Dockerfile" | cut -f1 -d\ )
 
 if [ "$DOCKERHUB_ORGANIZATION" != "" ]
 then
   DOCKER_IMAGE_NAME=$DOCKERHUB_ORGANIZATION/$DOCKER_IMAGE_NAME
-  docker pull $DOCKER_IMAGE_NAME
+  time docker pull "$DOCKER_IMAGE_NAME"
 else
   # Make sure docker image has been built. Should be instantaneous if so.
-  docker build -t $DOCKER_IMAGE_NAME $DOCKERFILE_DIR
+  docker build -t "$DOCKER_IMAGE_NAME" "$DOCKERFILE_DIR"
 fi
 
-# Choose random name for docker container
-CONTAINER_NAME="build_and_run_docker_$(uuidgen)"
+if [[ -t 0 ]]; then
+  DOCKER_TTY_ARGS="-it"
+else
+  # The input device on kokoro is not a TTY, so -it does not work.
+  DOCKER_TTY_ARGS=
+fi
 
-# Run command inside docker
+# Git root as seen by the docker instance
+# TODO(jtattermusch): rename to a more descriptive directory name
+# currently that's nontrivial because the name is hardcoded in many places.
+EXTERNAL_GIT_ROOT=/var/local/jenkins/grpc
+
+# temporary directory that will be mounted to the docker container
+# as a way to persist output files.
+# use unique name for the output directory to prevent clash between concurrent
+# runs of multiple docker containers
+TEMP_REPORT_DIR="$(mktemp -d)"
+TEMP_OUTPUT_DIR="$(mktemp -d)"
+
+# Run tests inside docker
+DOCKER_EXIT_CODE=0
+# TODO: silence complaint about $DOCKER_TTY_ARGS expansion in some other way
+# shellcheck disable=SC2086,SC2154
 docker run \
   "$@" \
-  -e EXTERNAL_GIT_ROOT="/var/local/jenkins/grpc" \
-  -e THIS_IS_REALLY_NEEDED='see https://github.com/docker/docker/issues/14203 for why docker is awful' \
-  -v "$git_root:/var/local/jenkins/grpc:ro" \
-  -w /var/local/git/grpc \
-  --name=$CONTAINER_NAME \
-  $DOCKER_IMAGE_NAME \
-  bash -l "/var/local/jenkins/grpc/$DOCKER_RUN_SCRIPT" || FAILED="true"
+  ${DOCKER_TTY_ARGS} \
+  ${EXTRA_DOCKER_ARGS} \
+  --cap-add SYS_PTRACE \
+  -e "DOCKER_RUN_SCRIPT_COMMAND=${DOCKER_RUN_SCRIPT_COMMAND}" \
+  -e "EXTERNAL_GIT_ROOT=${EXTERNAL_GIT_ROOT}" \
+  -e "OUTPUT_DIR=${OUTPUT_DIR}" \
+  --env-file tools/run_tests/dockerize/docker_propagate_env.list \
+  --rm \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  -v "${git_root}:${EXTERNAL_GIT_ROOT}" \
+  -v "${TEMP_REPORT_DIR}:/var/local/report_dir" \
+  -v "${TEMP_OUTPUT_DIR}:/var/local/output_dir" \
+  "${DOCKER_IMAGE_NAME}" \
+  bash -l "/var/local/jenkins/grpc/${DOCKER_RUN_SCRIPT}" || DOCKER_EXIT_CODE=$?
 
-# Copy output artifacts
-if [ "$OUTPUT_DIR" != "" ]
+# Copy reports stored by the container (if any)
+if [ "${GRPC_TEST_REPORT_BASE_DIR}" != "" ]
 then
-  docker cp "$CONTAINER_NAME:/var/local/git/grpc/$OUTPUT_DIR" "$git_root" || FAILED="true"
+  mkdir -p "${GRPC_TEST_REPORT_BASE_DIR}"
+  cp -r "${TEMP_REPORT_DIR}"/* "${GRPC_TEST_REPORT_BASE_DIR}" || true
+else
+  cp -r "${TEMP_REPORT_DIR}"/* "${git_root}" || true
 fi
 
-# remove the container, possibly killing it first
-docker rm -f $CONTAINER_NAME || true
-
-if [ "$FAILED" != "" ]
+# Copy contents of OUTPUT_DIR back under the git repo root
+if [ "${OUTPUT_DIR}" != "" ]
 then
-  exit 1
+  # create the directory if it doesn't exist yet.
+  mkdir -p "${TEMP_OUTPUT_DIR}/${OUTPUT_DIR}"
+  cp -r "${TEMP_OUTPUT_DIR}/${OUTPUT_DIR}" "${git_root}" || DOCKER_EXIT_CODE=$?
 fi
+
+exit $DOCKER_EXIT_CODE

@@ -1,49 +1,36 @@
 <?php
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
-class EndToEndTest extends PHPUnit_Framework_TestCase
+class EndToEndTest extends \PHPUnit\Framework\TestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         $this->server = new Grpc\Server([]);
         $this->port = $this->server->addHttp2Port('0.0.0.0:0');
-        $this->channel = new Grpc\Channel('localhost:'.$this->port, []);
+        $this->channel = new Grpc\Channel('localhost:'.$this->port, [
+            "force_new" => true,
+        ]);
         $this->server->start();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
-        unset($this->channel);
+        $this->channel->close();
         unset($this->server);
     }
 
@@ -52,7 +39,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $deadline = Grpc\Timeval::infFuture();
         $status_text = 'xyz';
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -64,7 +51,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_close);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -101,7 +88,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $req_text = 'message_write_flags_test';
         $status_text = 'xyz';
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -115,7 +102,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_close);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -149,7 +136,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -163,7 +150,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -201,18 +188,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         unset($server_call);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidClientMessageArray()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -222,18 +207,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidClientMessageString()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -243,18 +226,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidClientMessageFlags()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -266,18 +247,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidServerStatusMetadata()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -291,7 +270,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -307,18 +286,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidServerStatusCode()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -332,7 +309,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -348,18 +325,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testMissingServerStatusCode()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -373,7 +348,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -388,18 +363,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidServerStatusDetails()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -413,7 +386,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -429,18 +402,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testMissingServerStatusDetails()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -454,7 +425,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($event->send_message);
 
         $event = $this->server->requestCall();
-        $this->assertSame('dummy_method', $event->method);
+        $this->assertSame('phony_method', $event->method);
         $server_call = $event->call;
 
         $event = $server_call->startBatch([
@@ -469,18 +440,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testInvalidStartBatchKey()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -488,18 +457,16 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         ]);
     }
 
-    /**
-     * @expectedException LogicException
-     */
     public function testInvalidStartBatch()
     {
+        $this->expectException(\LogicException::class);
         $deadline = Grpc\Timeval::infFuture();
         $req_text = 'client_server_full_request_response';
         $reply_text = 'reply:client_server_full_request_response';
         $status_text = 'status:client_server_full_response_text';
 
         $call = new Grpc\Call($this->channel,
-                              'dummy_method',
+                              'phony_method',
                               $deadline);
 
         $event = $call->startBatch([
@@ -531,7 +498,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($idle_state == Grpc\CHANNEL_IDLE);
 
         $now = Grpc\Timeval::now();
-        $delta = new Grpc\Timeval(500000); // should timeout
+        $delta = new Grpc\Timeval(50000); // should timeout
         $deadline = $now->add($delta);
 
         $this->assertFalse($this->channel->watchConnectivityState(
@@ -560,7 +527,7 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($idle_state == Grpc\CHANNEL_IDLE);
 
         $now = Grpc\Timeval::now();
-        $delta = new Grpc\Timeval(100000);
+        $delta = new Grpc\Timeval(50000);
         $deadline = $now->add($delta);
 
         $this->assertFalse($this->channel->watchConnectivityState(
@@ -570,29 +537,23 @@ class EndToEndTest extends PHPUnit_Framework_TestCase
         $this->assertTrue($new_state == Grpc\CHANNEL_IDLE);
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testGetConnectivityStateInvalidParam()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $this->assertTrue($this->channel->getConnectivityState(
             new Grpc\Timeval()));
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testWatchConnectivityStateInvalidParam()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $this->assertTrue($this->channel->watchConnectivityState(
             0, 1000));
     }
 
-    /**
-     * @expectedException InvalidArgumentException
-     */
     public function testChannelConstructorInvalidParam()
     {
+        $this->expectException(\InvalidArgumentException::class);
         $this->channel = new Grpc\Channel('localhost:'.$this->port, null);
     }
 

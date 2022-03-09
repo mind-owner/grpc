@@ -1,41 +1,25 @@
 #!/bin/bash
-# Copyright 2016, Google Inc.
-# All rights reserved.
+# Copyright 2016 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 set -ex
 
-SYSTEM=`uname | cut -f 1 -d_`
+# the platform for which we wanna build the native gem
+GEM_PLATFORM="$1"
 
-cd $(dirname $0)/../../..
-set +ex
-[[ -s /etc/profile.d/rvm.sh ]] && . /etc/profile.d/rvm.sh
-[[ -s "$HOME/.rvm/scripts/rvm" ]] && source "$HOME/.rvm/scripts/rvm"
-set -ex
+SYSTEM=$(uname | cut -f 1 -d_)
+
+cd "$(dirname "$0")/../../.."
 
 if [ "$SYSTEM" == "MSYS" ] ; then
   SYSTEM=MINGW32
@@ -49,20 +33,31 @@ if [ "$SYSTEM" == "MINGW32" ] ; then
   exit 1
 fi
 
-set +ex
-rvm use default
-gem install bundler --update
+# log ruby version for easier debugging if things go wrong
+# we assume that the current ruby version has already been selected
+# (e.g. by the top-level CI script or with rvm locally)
+ruby --version
 
+# log gem versions for easier debugging if things go wrong
+gem list || true
+
+# avoid polluting the global gem diretory
+# by configuring "bundle install" to install all the gems
+# into a project-local directory
+export BUNDLE_PATH=bundle_local_gems
 tools/run_tests/helper_scripts/bundle_install_wrapper.sh
 
-set -ex
-
-rake gem:native
+# set the dockerhub org under which all the gRPC's ruby-compiler-dock docker images
+# are available.
+export DOCKERHUB_ORGANIZATION=grpctesting
+bundle exec rake "gem:native[${GEM_PLATFORM}]"
 
 if [ "$SYSTEM" == "Darwin" ] ; then
-  rm `ls pkg/*.gem | grep -v darwin`
+  # TODO: consider rewriting this to pass shellcheck
+  # shellcheck disable=SC2046,SC2010
+  rm $(ls pkg/*.gem | grep -v darwin)
 fi
 
-mkdir -p artifacts
+mkdir -p "${ARTIFACTS_OUT}"
 
-cp pkg/*.gem artifacts
+cp pkg/*.gem "${ARTIFACTS_OUT}"/

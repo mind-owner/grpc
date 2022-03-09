@@ -1,14 +1,14 @@
 Pod::Spec.new do |s|
   s.name     = "AuthTestService"
   s.version  = "0.0.1"
-  s.license  = "New BSD"
+  s.license  = "Apache License, Version 2.0"
   s.authors  = { 'gRPC contributors' => 'grpc-io@googlegroups.com' }
-  s.homepage = "http://www.grpc.io/"
+  s.homepage = "https://grpc.io/"
   s.summary = "AuthTestService example"
   s.source = { :git => 'https://github.com/grpc/grpc.git' }
 
-  s.ios.deployment_target = "7.1"
-  s.osx.deployment_target = "10.9"
+  s.ios.deployment_target = "9.0"
+  s.osx.deployment_target = "10.10"
 
   # Base directory where the .proto files are.
   src = "../../protos"

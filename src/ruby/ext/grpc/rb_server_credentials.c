@@ -1,46 +1,31 @@
 /*
  *
- * Copyright 2015, Google Inc.
- * All rights reserved.
+ * Copyright 2015 gRPC authors.
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *     * Redistributions of source code must retain the above copyright
- * notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following disclaimer
- * in the documentation and/or other materials provided with the
- * distribution.
- *     * Neither the name of Google Inc. nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  */
 
 #include <ruby/ruby.h>
 
-#include "rb_grpc_imports.generated.h"
 #include "rb_server_credentials.h"
+
+#include "rb_grpc.h"
+#include "rb_grpc_imports.generated.h"
 
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/support/log.h>
-
-#include "rb_grpc.h"
 
 /* grpc_rb_cServerCredentials is the ruby class that proxies
    grpc_server_credentials. */
@@ -53,16 +38,16 @@ typedef struct grpc_rb_server_credentials {
   /* Holder of ruby objects involved in constructing the server credentials */
   VALUE mark;
   /* The actual server credentials */
-  grpc_server_credentials *wrapped;
+  grpc_server_credentials* wrapped;
 } grpc_rb_server_credentials;
 
 /* Destroys the server credentials instances. */
-static void grpc_rb_server_credentials_free(void *p) {
-  grpc_rb_server_credentials *wrapper = NULL;
+static void grpc_rb_server_credentials_free_internal(void* p) {
+  grpc_rb_server_credentials* wrapper = NULL;
   if (p == NULL) {
     return;
   };
-  wrapper = (grpc_rb_server_credentials *)p;
+  wrapper = (grpc_rb_server_credentials*)p;
 
   /* Delete the wrapped object if the mark object is Qnil, which indicates that
      no other object is the actual owner. */
@@ -74,13 +59,19 @@ static void grpc_rb_server_credentials_free(void *p) {
   xfree(p);
 }
 
+/* Destroys the server credentials instances. */
+static void grpc_rb_server_credentials_free(void* p) {
+  grpc_rb_server_credentials_free_internal(p);
+  grpc_ruby_shutdown();
+}
+
 /* Protects the mark object from GC */
-static void grpc_rb_server_credentials_mark(void *p) {
-  grpc_rb_server_credentials *wrapper = NULL;
+static void grpc_rb_server_credentials_mark(void* p) {
+  grpc_rb_server_credentials* wrapper = NULL;
   if (p == NULL) {
     return;
   }
-  wrapper = (grpc_rb_server_credentials *)p;
+  wrapper = (grpc_rb_server_credentials*)p;
 
   /* If it's not already cleaned up, mark the mark object */
   if (wrapper->mark != Qnil) {
@@ -102,10 +93,10 @@ static const rb_data_type_t grpc_rb_server_credentials_data_type = {
 };
 
 /* Allocates ServerCredential instances.
-
    Provides safe initial defaults for the instance fields. */
 static VALUE grpc_rb_server_credentials_alloc(VALUE cls) {
-  grpc_rb_server_credentials *wrapper = ALLOC(grpc_rb_server_credentials);
+  grpc_ruby_init();
+  grpc_rb_server_credentials* wrapper = ALLOC(grpc_rb_server_credentials);
   wrapper->wrapped = NULL;
   wrapper->mark = Qnil;
   return TypedData_Wrap_Struct(cls, &grpc_rb_server_credentials_data_type,
@@ -143,9 +134,9 @@ static VALUE sym_private_key;
 static VALUE grpc_rb_server_credentials_init(VALUE self, VALUE pem_root_certs,
                                              VALUE pem_key_certs,
                                              VALUE force_client_auth) {
-  grpc_rb_server_credentials *wrapper = NULL;
-  grpc_server_credentials *creds = NULL;
-  grpc_ssl_pem_key_cert_pair *key_cert_pairs = NULL;
+  grpc_rb_server_credentials* wrapper = NULL;
+  grpc_server_credentials* creds = NULL;
+  grpc_ssl_pem_key_cert_pair* key_cert_pairs = NULL;
   VALUE cert = Qnil;
   VALUE key = Qnil;
   VALUE key_cert = Qnil;
@@ -217,7 +208,11 @@ static VALUE grpc_rb_server_credentials_init(VALUE self, VALUE pem_root_certs,
   }
   xfree(key_cert_pairs);
   if (creds == NULL) {
-    rb_raise(rb_eRuntimeError, "could not create a credentials, not sure why");
+    rb_raise(rb_eRuntimeError,
+             "the call to grpc_ssl_server_credentials_create_ex() failed, "
+             "could not create a credentials, see "
+             "https://github.com/grpc/grpc/blob/master/TROUBLESHOOTING.md for "
+             "debugging tips");
     return Qnil;
   }
   wrapper->wrapped = creds;
@@ -250,9 +245,15 @@ void Init_grpc_server_credentials() {
 }
 
 /* Gets the wrapped grpc_server_credentials from the ruby wrapper */
-grpc_server_credentials *grpc_rb_get_wrapped_server_credentials(VALUE v) {
-  grpc_rb_server_credentials *wrapper = NULL;
+grpc_server_credentials* grpc_rb_get_wrapped_server_credentials(VALUE v) {
+  grpc_rb_server_credentials* wrapper = NULL;
+  Check_TypedStruct(v, &grpc_rb_server_credentials_data_type);
   TypedData_Get_Struct(v, grpc_rb_server_credentials,
                        &grpc_rb_server_credentials_data_type, wrapper);
   return wrapper->wrapped;
+}
+
+/* Check if v is kind of ServerCredentials */
+bool grpc_rb_is_server_credentials(VALUE v) {
+  return rb_typeddata_is_kind_of(v, &grpc_rb_server_credentials_data_type);
 }

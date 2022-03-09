@@ -9,30 +9,37 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>grpc.testing.CoreResponse</code>
+ * Generated from protobuf message <code>grpc.testing.CoreResponse</code>
  */
 class CoreResponse extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <pre>
      * Number of cores available on the server
-     * </pre>
      *
-     * <code>int32 cores = 1;</code>
+     * Generated from protobuf field <code>int32 cores = 1;</code>
      */
-    private $cores = 0;
+    protected $cores = 0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type int $cores
+     *           Number of cores available on the server
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <pre>
      * Number of cores available on the server
-     * </pre>
      *
-     * <code>int32 cores = 1;</code>
+     * Generated from protobuf field <code>int32 cores = 1;</code>
+     * @return int
      */
     public function getCores()
     {
@@ -40,16 +47,18 @@ class CoreResponse extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * Number of cores available on the server
-     * </pre>
      *
-     * <code>int32 cores = 1;</code>
+     * Generated from protobuf field <code>int32 cores = 1;</code>
+     * @param int $var
+     * @return $this
      */
     public function setCores($var)
     {
         GPBUtil::checkInt32($var);
         $this->cores = $var;
+
+        return $this;
     }
 
 }

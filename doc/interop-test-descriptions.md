@@ -35,7 +35,10 @@ Clients should accept these arguments:
     * OAuth scope. For example, "https://www.googleapis.com/auth/xapi.zoo"
 * --service_account_key_file=PATH
     * The path to the service account JSON key file generated from GCE developer
-    console.
+      console.
+* --service_config_json=SERVICE_CONFIG_JSON
+    * Disables service config lookups and sets the provided string as the
+      default service config.
 
 Clients must support TLS with ALPN. Clients must not disable certificate
 checking.
@@ -81,9 +84,8 @@ Procedure:
     Client marks the request as cacheable by setting the cacheable flag in the
     request context. Longer term this should be driven by the method option
     specified in the proto file itself.
- 2. Client calls CacheableUnaryCall with `SimpleRequest` request again
-    immediately with the same payload as the previous request. Cacheable flag is
-    also set for this request's context.
+ 2. Client calls CacheableUnaryCall again immediately with the same request and
+    configuration as the previous call.
 
 Client asserts:
 * Both calls were successful
@@ -184,7 +186,8 @@ the `response_compressed` boolean.
 
 Whether compression was actually performed is determined by the compression bit
 in the response's message flags. *Note that some languages may not have access
-to the message flags*.
+to the message flags, in which case the client will be unable to verify that
+the `response_compressed` boolean is obeyed by the server*.
 
 
 Server features:
@@ -219,10 +222,10 @@ Procedure:
     ```
     Client asserts:
     * call was successful
-    * when `response_compressed` is true, the response MUST have the
-      compressed message flag set.
-    * when `response_compressed` is false, the response MUST NOT have
-      the compressed message flag set.
+    * if supported by the implementation, when `response_compressed` is true,
+      the response MUST have the compressed message flag set.
+    * if supported by the implementation, when `response_compressed` is false,
+      the response MUST NOT have the compressed message flag set.
     * response payload body is 314159 bytes in size in both cases.
     * clients are free to assert that the response payload body contents are
       zero and comparing the entire response message against a golden response
@@ -305,8 +308,8 @@ Procedure:
       }
     }
     ```
-    If the call fails with `INVALID_ARGUMENT`, the test fails. Otherwise, we
-    continue.
+    If the call does not fail with `INVALID_ARGUMENT`, the test fails.
+    Otherwise, we continue.
 
  1. Client calls `StreamingInputCall` again, sending the *compressed* message
 
@@ -378,7 +381,13 @@ Client asserts:
 ### server_compressed_streaming
 
 This test verifies that the server can compress streaming messages and disable
-compression on individual messages.
+compression on individual messages, expecting the server's response to be
+compressed or not according to the `response_compressed` boolean.
+
+Whether compression was actually performed is determined by the compression bit
+in the response's message flags. *Note that some languages may not have access
+to the message flags, in which case the client will be unable to verify that the
+`response_compressed` boolean is obeyed by the server*.
 
 Server features:
 * [StreamingOutputCall][]
@@ -408,14 +417,13 @@ Procedure:
     Client asserts:
     * call was successful
     * exactly two responses
-    * when `response_compressed` is false, the response's messages MUST
-      NOT have the compressed message flag set.
-    * when `response_compressed` is true, the response's messages MUST
-      have the compressed message flag set.
+    * if supported by the implementation, when `response_compressed` is false,
+      the response's messages MUST NOT have the compressed message flag set.
+    * if supported by the implementation, when `response_compressed` is true,
+      the response's messages MUST have the compressed message flag set.
     * response payload bodies are sized (in order): 31415, 92653
     * clients are free to assert that the response payload body contents are
       zero and comparing the entire response messages against golden responses
-
 
 ### ping_pong
 
@@ -647,7 +655,7 @@ The test
 downloaded from https://console.developers.google.com. Alternately, if using a
 usable auth implementation, it may specify the file location in the environment
 variable GOOGLE_APPLICATION_CREDENTIALS
-- optionally uses the flag `--oauth_scope` for the oauth scope if implementator
+- optionally uses the flag `--oauth_scope` for the oauth scope if implementer
 wishes to use service account credential instead of JWT credential. For testing
 against grpc-test.sandbox.googleapis.com, oauth scope
 "https://www.googleapis.com/auth/xapi.zoo" should be used.
@@ -674,6 +682,81 @@ Client asserts:
 by the auth library. The client can optionally check the username matches the
 email address in the key file.
 
+### google_default_credentials
+
+Similar to the other auth tests, this test should only be run against prod
+servers. Different from some of the other auth tests however, this test
+may be also run from outside of GCP.
+
+This test verifies unary calls succeed when the client uses
+GoogleDefaultCredentials. The path to a service account key file in the
+GOOGLE_APPLICATION_CREDENTIALS environment variable may or may not be
+provided by the test runner. For example, the test runner might set
+this environment when outside of GCP but keep it unset when on GCP.
+
+The test uses `--default_service_account` with GCE service account email.
+
+Server features:
+* [UnaryCall][]
+* [Echo Authenticated Username][]
+
+Procedure:
+ 1. Client configures the channel to use GoogleDefaultCredentials
+     * Note: the term `GoogleDefaultCredentials` within the context
+       of this test description refers to an API which encapsulates
+       both "transport credentials" and "call credentials" and which
+       is capable of transport creds auto-selection (including ALTS).
+       Similar APIs involving only auto-selection of OAuth mechanisms
+       might work for this test but aren't the intended subjects.
+ 2. Client calls UnaryCall with:
+
+    ```
+    {
+      fill_username: true
+    }
+    ```
+
+Client asserts:
+* call was successful
+* received SimpleResponse.username matches the value of
+  `--default_service_account`
+
+### compute_engine_channel_credentials
+
+Similar to the other auth tests, this test should only be run against prod
+servers. Note that this test may only be ran on GCP.
+
+This test verifies unary calls succeed when the client uses
+ComputeEngineChannelCredentials. All that is needed by the test environment
+is for the client to be running on GCP.
+
+The test uses `--default_service_account` with GCE service account email. This
+email must identify the default service account of the GCP VM that the test
+is running on.
+
+Server features:
+* [UnaryCall][]
+* [Echo Authenticated Username][]
+
+Procedure:
+ 1. Client configures the channel to use ComputeEngineChannelCredentials
+     * Note: the term `ComputeEngineChannelCredentials` within the context
+       of this test description refers to an API which encapsulates
+       both "transport credentials" and "call credentials" and which
+       is capable of transport creds auto-selection (including ALTS).
+       The exact name of the API may vary per language.
+ 2. Client calls UnaryCall with:
+
+    ```
+    {
+      fill_username: true
+    }
+    ```
+
+Client asserts:
+* call was successful
+* received SimpleResponse.username matches the value of
+  `--default_service_account`
 
 ### custom_metadata
 
@@ -778,6 +861,32 @@ Client asserts:
   and 2
 * received status message is the same as the sent message for both Procedure
   steps 1 and 2
+
+### special_status_message
+
+This test verifies Unicode and whitespace is correctly processed in status
+message. "\t" is horizontal tab. "\r" is carriage return.  "\n" is line feed.
+
+Server features:
+* [UnaryCall][]
+* [Echo Status][]
+
+Procedure:
+ 1. Client calls UnaryCall with:
+
+    ```
+    {
+      response_status:{
+        code: 2
+        message: "\t\ntest with whitespace\r\nand Unicode BMP ☺ and non-BMP 😈\t\n"
+      }
+    }
+    ```
+
+Client asserts:
+* received status code is the same as the sent code for Procedure step 1
+* received status message is the same as the sent message for Procedure step 1,
+  including all whitespace characters
 
 ### unimplemented_method
 
@@ -894,6 +1003,79 @@ Status: TODO
 This test verifies that a client sending faster than a server can drain sees
 pushback (i.e., attempts to send succeed only after appropriate delays).
 
+#### rpc_soak
+
+The client performs many large_unary RPCs in sequence over the same channel.
+The client records the latency and status of each RPC in some data structure.
+If the test ever consumes `soak_overall_timeout_seconds` seconds and still hasn't
+completed `soak_iterations` RPCs, then the test should discontinue sending RPCs
+as soon as possible. After performing all RPCs, the test should examine
+previously recorded RPC latency and status results in a second pass and fail if
+either:
+
+a) not all `soak_iterations` RPCs were completed
+
+b) the sum of RPCs that either completed with a non-OK status or exceeded
+   `max_acceptable_per_rpc_latency_ms` exceeds `soak_max_failures`
+
+Implementations should use a timer with sub-millisecond precision to measure
+latency. Also, implementations should avoid setting RPC deadlines and should
+instead wait for each RPC to complete. Doing so provides more data for
+debugging in case of failure. For example, if RPC deadlines are set to
+`soak_per_iteration_max_acceptable_latency_ms` and one of the RPCs hits that
+deadline, it's not clear if the RPC was late by a millisecond or a minute.
+
+This test must be configurable via a few different command line flags:
+
+* `soak_iterations`: Controls the number of RPCs to perform. This should
+  default to 10.
+
+* `soak_max_failures`: An inclusive upper limit on the number of RPC failures
+  that should be tolerated (i.e. after which the test process should
+  still exit 0). A failure is considered to be either a non-OK status or an RPC
+  whose latency exceeds `soak_per_iteration_max_acceptable_latency_ms`. This
+  should default to 0.
+
+* `soak_per_iteration_max_acceptable_latency_ms`: An upper limit on the latency
+  of a single RPC in order for that RPC to be considered successful. This
+  should default to 1000.
+
+* `soak_overall_timeout_seconds`: The overall number of seconds after which
+  the test should stop and fail if `soak_iterations` have not yet been
+  completed. This should default to
+  `soak_per_iteration_max_acceptable_latency_ms` * `soak_iterations`.
+
+The following is optional but encouraged to improve debuggability:
+
+* Implementations should log the number of milliseconds that each RPC takes.
+  Additionally, implementations should use a histogram of RPC latencies
+  to log interesting latency percentiles at the end of the test (e.g. median,
+  90th, and max latency percentiles).
+
+#### channel_soak
+
+Similar to rpc_soak, but this time each RPC is performed on a new channel. The
+channel is created just before each RPC and is destroyed just after.
+
+This test is configured with the same command line flags that the rpc_soak test
+is configured with, with only one semantic difference: when measuring an RPCs
+latency to see if it exceeds `soak_per_iteration_max_acceptable_latency_ms` or
+not, the creation of the channel should be included in that
+latency measurement, but the teardown of that channel should **not** be
+included in that latency measurement (channel teardown semantics differ widely
+between languages). This latency measurement should also be the value that is
+logged and recorded in the latency histogram.
+
+### Experimental Tests
+
+These tests are not yet standardized, and are not yet implemented in all
+languages. Therefore they are not part of our interop matrix.
+
+#### long_lived_channel
+
+The client performs a number of large_unary RPCs over a single long-lived
+channel with a fixed but configurable interval between each RPC.
+
 ### TODO Tests
 
 #### High priority:
@@ -986,11 +1168,12 @@ for the `SimpleRequest.response_type`. If the server does not support the
 `response_type`, then it should fail the RPC with `INVALID_ARGUMENT`.
 
 ### CacheableUnaryCall
+[CacheableUnaryCall]: #cacheableunarycall
 
 Server gets the default SimpleRequest proto as the request. The content of the
 request is ignored. It returns the SimpleResponse proto with the payload set
 to current timestamp.  The timestamp is an integer representing current time
-with nanosecond resolution. This integer is formated as ASCII decimal in the
+with nanosecond resolution. This integer is formatted as ASCII decimal in the
 response. The format is not really important as long as the response payload
 is different for each request. In addition it adds
   1. cache control headers such that the response can be cached by proxies in
@@ -1041,7 +1224,7 @@ responses, it closes with OK.
 ### Echo Status
 [Echo Status]: #echo-status
 When the client sends a response_status in the request payload, the server closes
-the stream with the status code and messsage contained within said response_status.
+the stream with the status code and message contained within said response_status.
 The server will not process any further messages on the stream sent by the client.
 This can be used by clients to verify correct handling of different status codes and
 associated status messages end-to-end.
@@ -1058,7 +1241,7 @@ key and the corresponding value back to the client as trailing metadata.
 [Observe ResponseParameters.interval_us]: #observe-responseparametersinterval_us
 
 In StreamingOutputCall and FullDuplexCall, server delays sending a
-StreamingOutputCallResponse by the ResponseParameters's `interval_us` for that
+StreamingOutputCallResponse by the ResponseParameters' `interval_us` for that
 particular response, relative to the last response sent. That is, `interval_us`
 acts like a sleep *before* sending the response and accumulates from one
 response to the next.
@@ -1095,4 +1278,3 @@ Discussion:
 Ideally, this would be communicated via metadata and not in the
 request/response, but we want to use this test in code paths that don't yet
 fully communicate metadata.
-

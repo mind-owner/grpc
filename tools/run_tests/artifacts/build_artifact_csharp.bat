@@ -1,44 +1,52 @@
-@rem Copyright 2016, Google Inc.
-@rem All rights reserved.
+@rem Copyright 2016 gRPC authors.
 @rem
-@rem Redistribution and use in source and binary forms, with or without
-@rem modification, are permitted provided that the following conditions are
-@rem met:
+@rem Licensed under the Apache License, Version 2.0 (the "License");
+@rem you may not use this file except in compliance with the License.
+@rem You may obtain a copy of the License at
 @rem
-@rem     * Redistributions of source code must retain the above copyright
-@rem notice, this list of conditions and the following disclaimer.
-@rem     * Redistributions in binary form must reproduce the above
-@rem copyright notice, this list of conditions and the following disclaimer
-@rem in the documentation and/or other materials provided with the
-@rem distribution.
-@rem     * Neither the name of Google Inc. nor the names of its
-@rem contributors may be used to endorse or promote products derived from
-@rem this software without specific prior written permission.
+@rem     http://www.apache.org/licenses/LICENSE-2.0
 @rem
-@rem THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-@rem "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-@rem LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-@rem A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-@rem OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-@rem SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-@rem LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-@rem DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-@rem THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-@rem (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-@rem OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+@rem Unless required by applicable law or agreed to in writing, software
+@rem distributed under the License is distributed on an "AS IS" BASIS,
+@rem WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+@rem See the License for the specific language governing permissions and
+@rem limitations under the License.
 
 @rem Builds C# artifacts on Windows
 
 set ARCHITECTURE=%1
 
-@call tools\run_tests\helper_scripts\pre_build_csharp.bat %ARCHITECTURE% || goto :error
+@rem enter repo root
+cd /d %~dp0\..\..\..
 
-cd cmake\build\%ARCHITECTURE%
-cmake --build . --target grpc_csharp_ext --config Release
+mkdir cmake
+cd cmake
+mkdir build
+cd build
+mkdir %ARCHITECTURE%
+cd %ARCHITECTURE%
+
+@rem Use externally provided env to determine build parallelism, otherwise use default.
+if "%GRPC_CSHARP_BUILD_EXT_COMPILER_JOBS%"=="" (
+  set GRPC_CSHARP_BUILD_EXT_COMPILER_JOBS=2
+)
+
+@rem set cl.exe build environment to build with VS2015 tooling
+@rem this is required for Ninja build to work
+call "%VS140COMNTOOLS%..\..\VC\vcvarsall.bat" %ARCHITECTURE%
+@rem restore command echo
+echo on
+
+@rem Select MSVC compiler (cl.exe) explicitly to make sure we don't end up gcc from mingw or cygwin
+@rem (both are on path in kokoro win workers)
+cmake -G Ninja -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DgRPC_BUILD_TESTS=OFF -DgRPC_MSVC_STATIC_RUNTIME=ON -DgRPC_XDS_USER_AGENT_IS_CSHARP=ON ../../.. || goto :error
+
+ninja -j%GRPC_CSHARP_BUILD_EXT_COMPILER_JOBS% grpc_csharp_ext || goto :error
 cd ..\..\..
 
-mkdir artifacts
-copy /Y cmake\build\Win32\Release\grpc_csharp_ext.dll artifacts || copy /Y cmake\build\x64\Release\grpc_csharp_ext.dll artifacts || goto :error
+mkdir -p %ARTIFACTS_OUT%
+copy /Y cmake\build\%ARCHITECTURE%\grpc_csharp_ext.dll %ARTIFACTS_OUT% || goto :error
+copy /Y cmake\build\%ARCHITECTURE%\grpc_csharp_ext.pdb %ARTIFACTS_OUT% || goto :error
 
 goto :EOF
 

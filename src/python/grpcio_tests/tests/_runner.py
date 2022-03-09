@@ -1,36 +1,20 @@
-# Copyright 2015, Google Inc.
-# All rights reserved.
+# Copyright 2015 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 from __future__ import absolute_import
 
 import collections
-import multiprocessing
 import os
 import select
 import signal
@@ -96,7 +80,7 @@ class CaptureFile(object):
       value (str): What to write to the original file.
     """
         if six.PY3 and not isinstance(value, six.binary_type):
-            value = bytes(value, 'ascii')
+            value = value.encode('ascii')
         if self._saved_fd is None:
             os.write(self._redirect_fd, value)
         else:
@@ -130,7 +114,22 @@ class AugmentedCase(collections.namedtuple('AugmentedCase', ['case', 'id'])):
         return super(cls, AugmentedCase).__new__(cls, case, id)
 
 
+# NOTE(lidiz) This complex wrapper is not triggering setUpClass nor
+# tearDownClass. Do not use those methods, or fix this wrapper!
 class Runner(object):
+
+    def __init__(self, dedicated_threads=False):
+        """Constructs the Runner object.
+
+        Args:
+          dedicated_threads: A bool indicates whether to spawn each unit test
+            in separate thread or not.
+        """
+        self._skipped_tests = []
+        self._dedicated_threads = dedicated_threads
+
+    def skip_tests(self, tests):
+        self._skipped_tests = tests
 
     def run(self, suite):
         """See setuptools' test_runner setup argument for information."""
@@ -184,7 +183,6 @@ class Runner(object):
                 pass
 
         try_set_handler('SIGINT', sigint_handler)
-        try_set_handler('SIGSEGV', fault_handler)
         try_set_handler('SIGBUS', fault_handler)
         try_set_handler('SIGABRT', fault_handler)
         try_set_handler('SIGFPE', fault_handler)
@@ -196,27 +194,38 @@ class Runner(object):
         # Run the tests
         result.startTestRun()
         for augmented_case in augmented_cases:
-            sys.stdout.write(
-                'Running       {}\n'.format(augmented_case.case.id()))
-            sys.stdout.flush()
-            case_thread = threading.Thread(
-                target=augmented_case.case.run, args=(result,))
-            try:
-                with stdout_pipe, stderr_pipe:
-                    case_thread.start()
-                    while case_thread.is_alive():
-                        check_kill_self()
-                        time.sleep(0)
-                    case_thread.join()
-            except:
-                # re-raise the exception after forcing the with-block to end
-                raise
-            result.set_output(augmented_case.case,
-                              stdout_pipe.output(), stderr_pipe.output())
-            sys.stdout.write(result_out.getvalue())
-            sys.stdout.flush()
-            result_out.truncate(0)
-            check_kill_self()
+            for skipped_test in self._skipped_tests:
+                if skipped_test in augmented_case.case.id():
+                    break
+            else:
+                sys.stdout.write('Running       {}\n'.format(
+                    augmented_case.case.id()))
+                sys.stdout.flush()
+                if self._dedicated_threads:
+                    # (Deprecated) Spawns dedicated thread for each test case.
+                    case_thread = threading.Thread(
+                        target=augmented_case.case.run, args=(result,))
+                    try:
+                        with stdout_pipe, stderr_pipe:
+                            case_thread.start()
+                            # If the thread is exited unexpected, stop testing.
+                            while case_thread.is_alive():
+                                check_kill_self()
+                                time.sleep(0)
+                            case_thread.join()
+                    except:  # pylint: disable=try-except-raise
+                        # re-raise the exception after forcing the with-block to end
+                        raise
+                    # Records the result of the test case run.
+                    result.set_output(augmented_case.case, stdout_pipe.output(),
+                                      stderr_pipe.output())
+                    sys.stdout.write(result_out.getvalue())
+                    sys.stdout.flush()
+                    result_out.truncate(0)
+                    check_kill_self()
+                else:
+                    # Donates current thread to test case execution.
+                    augmented_case.case.run(result)
         result.stopTestRun()
         stdout_pipe.close()
         stderr_pipe.close()

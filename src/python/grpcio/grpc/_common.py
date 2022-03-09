@@ -1,55 +1,38 @@
-# Copyright 2016, Google Inc.
-# All rights reserved.
+# Copyright 2016 gRPC authors.
 #
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#     * Redistributions of source code must retain the above copyright
-# notice, this list of conditions and the following disclaimer.
-#     * Redistributions in binary form must reproduce the above
-# copyright notice, this list of conditions and the following disclaimer
-# in the documentation and/or other materials provided with the
-# distribution.
-#     * Neither the name of Google Inc. nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-# "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-# LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-# A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-# OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-# LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-# DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-# THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-# (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 """Shared implementation."""
 
 import logging
-import threading
 import time
-
-import six
 
 import grpc
 from grpc._cython import cygrpc
+import six
 
-EMPTY_METADATA = cygrpc.Metadata(())
+_LOGGER = logging.getLogger(__name__)
 
 CYGRPC_CONNECTIVITY_STATE_TO_CHANNEL_CONNECTIVITY = {
     cygrpc.ConnectivityState.idle:
-    grpc.ChannelConnectivity.IDLE,
+        grpc.ChannelConnectivity.IDLE,
     cygrpc.ConnectivityState.connecting:
-    grpc.ChannelConnectivity.CONNECTING,
+        grpc.ChannelConnectivity.CONNECTING,
     cygrpc.ConnectivityState.ready:
-    grpc.ChannelConnectivity.READY,
+        grpc.ChannelConnectivity.READY,
     cygrpc.ConnectivityState.transient_failure:
-    grpc.ChannelConnectivity.TRANSIENT_FAILURE,
+        grpc.ChannelConnectivity.TRANSIENT_FAILURE,
     cygrpc.ConnectivityState.shutdown:
-    grpc.ChannelConnectivity.SHUTDOWN,
+        grpc.ChannelConnectivity.SHUTDOWN,
 }
 
 CYGRPC_STATUS_CODE_TO_STATUS_CODE = {
@@ -72,53 +55,27 @@ CYGRPC_STATUS_CODE_TO_STATUS_CODE = {
     cygrpc.StatusCode.data_loss: grpc.StatusCode.DATA_LOSS,
 }
 STATUS_CODE_TO_CYGRPC_STATUS_CODE = {
-    grpc_code: cygrpc_code
-    for cygrpc_code, grpc_code in six.iteritems(
+    grpc_code: cygrpc_code for cygrpc_code, grpc_code in six.iteritems(
         CYGRPC_STATUS_CODE_TO_STATUS_CODE)
 }
+
+MAXIMUM_WAIT_TIMEOUT = 0.1
+
+_ERROR_MESSAGE_PORT_BINDING_FAILED = 'Failed to bind to address %s; set ' \
+    'GRPC_VERBOSITY=debug environment variable to see detailed error message.'
 
 
 def encode(s):
     if isinstance(s, bytes):
         return s
     else:
-        return s.encode('ascii')
+        return s.encode('utf8')
 
 
 def decode(b):
-    if isinstance(b, str):
-        return b
-    else:
-        try:
-            return b.decode('utf8')
-        except UnicodeDecodeError:
-            logging.exception('Invalid encoding on %s', b)
-            return b.decode('latin1')
-
-
-def channel_args(options):
-    cygrpc_args = []
-    for key, value in options:
-        if isinstance(value, six.string_types):
-            cygrpc_args.append(cygrpc.ChannelArg(encode(key), encode(value)))
-        else:
-            cygrpc_args.append(cygrpc.ChannelArg(encode(key), value))
-    return cygrpc.ChannelArgs(cygrpc_args)
-
-
-def to_cygrpc_metadata(application_metadata):
-    return EMPTY_METADATA if application_metadata is None else cygrpc.Metadata(
-        cygrpc.Metadatum(encode(key), encode(value))
-        for key, value in application_metadata)
-
-
-def to_application_metadata(cygrpc_metadata):
-    if cygrpc_metadata is None:
-        return ()
-    else:
-        return tuple((decode(key), value
-                      if key[-4:] == b'-bin' else decode(value))
-                     for key, value in cygrpc_metadata)
+    if isinstance(b, bytes):
+        return b.decode('utf-8', 'replace')
+    return b
 
 
 def _transform(message, transformer, exception_message):
@@ -128,7 +85,7 @@ def _transform(message, transformer, exception_message):
         try:
             return transformer(message)
         except Exception:  # pylint: disable=broad-except
-            logging.exception(exception_message)
+            _LOGGER.exception(exception_message)
             return None
 
 
@@ -145,33 +102,67 @@ def fully_qualified_method(group, method):
     return '/{}/{}'.format(group, method)
 
 
-class CleanupThread(threading.Thread):
-    """A threading.Thread subclass supporting custom behavior on join().
+def _wait_once(wait_fn, timeout, spin_cb):
+    wait_fn(timeout=timeout)
+    if spin_cb is not None:
+        spin_cb()
 
-    On Python Interpreter exit, Python will attempt to join outstanding threads
-    prior to garbage collection.  We may need to do additional cleanup, and
-    we accomplish this by overriding the join() method.
+
+def wait(wait_fn, wait_complete_fn, timeout=None, spin_cb=None):
+    """Blocks waiting for an event without blocking the thread indefinitely.
+
+    See https://github.com/grpc/grpc/issues/19464 for full context. CPython's
+    `threading.Event.wait` and `threading.Condition.wait` methods, if invoked
+    without a timeout kwarg, may block the calling thread indefinitely. If the
+    call is made from the main thread, this means that signal handlers may not
+    run for an arbitrarily long period of time.
+
+    This wrapper calls the supplied wait function with an arbitrary short
+    timeout to ensure that no signal handler has to wait longer than
+    MAXIMUM_WAIT_TIMEOUT before executing.
+
+    Args:
+      wait_fn: A callable acceptable a single float-valued kwarg named
+        `timeout`. This function is expected to be one of `threading.Event.wait`
+        or `threading.Condition.wait`.
+      wait_complete_fn: A callable taking no arguments and returning a bool.
+        When this function returns true, it indicates that waiting should cease.
+      timeout: An optional float-valued number of seconds after which the wait
+        should cease.
+      spin_cb: An optional Callable taking no arguments and returning nothing.
+        This callback will be called on each iteration of the spin. This may be
+        used for, e.g. work related to forking.
+
+    Returns:
+      True if a timeout was supplied and it was reached. False otherwise.
     """
+    if timeout is None:
+        while not wait_complete_fn():
+            _wait_once(wait_fn, MAXIMUM_WAIT_TIMEOUT, spin_cb)
+    else:
+        end = time.time() + timeout
+        while not wait_complete_fn():
+            remaining = min(end - time.time(), MAXIMUM_WAIT_TIMEOUT)
+            if remaining < 0:
+                return True
+            _wait_once(wait_fn, remaining, spin_cb)
+    return False
 
-    def __init__(self, behavior, *args, **kwargs):
-        """Constructor.
 
-        Args:
-            behavior (function): Function called on join() with a single
-                argument, timeout, indicating the maximum duration of
-                `behavior`, or None indicating `behavior` has no deadline.
-                `behavior` must be idempotent.
-            args: Positional arguments passed to threading.Thread constructor.
-            kwargs: Keyword arguments passed to threading.Thread constructor.
-        """
-        super(CleanupThread, self).__init__(*args, **kwargs)
-        self._behavior = behavior
+def validate_port_binding_result(address, port):
+    """Validates if the port binding succeed.
 
-    def join(self, timeout=None):
-        start_time = time.time()
-        self._behavior(timeout)
-        end_time = time.time()
-        if timeout is not None:
-            timeout -= end_time - start_time
-            timeout = max(timeout, 0)
-        super(CleanupThread, self).join(timeout)
+    If the port returned by Core is 0, the binding is failed. However, in that
+    case, the Core API doesn't return a detailed failing reason. The best we
+    can do is raising an exception to prevent further confusion.
+
+    Args:
+        address: The address string to be bound.
+        port: An int returned by core
+    """
+    if port == 0:
+        # The Core API doesn't return a failure message. The best we can do
+        # is raising an exception to prevent further confusion.
+        raise RuntimeError(_ERROR_MESSAGE_PORT_BINDING_FAILED % address)
+    else:
+        return port

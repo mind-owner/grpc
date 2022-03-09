@@ -9,34 +9,39 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * <pre>
  * Request current stats
- * </pre>
  *
- * Protobuf type <code>grpc.testing.Mark</code>
+ * Generated from protobuf message <code>grpc.testing.Mark</code>
  */
 class Mark extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <pre>
      * if true, the stats will be reset after taking their snapshot.
-     * </pre>
      *
-     * <code>bool reset = 1;</code>
+     * Generated from protobuf field <code>bool reset = 1;</code>
      */
-    private $reset = false;
+    protected $reset = false;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type bool $reset
+     *           if true, the stats will be reset after taking their snapshot.
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Control::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <pre>
      * if true, the stats will be reset after taking their snapshot.
-     * </pre>
      *
-     * <code>bool reset = 1;</code>
+     * Generated from protobuf field <code>bool reset = 1;</code>
+     * @return bool
      */
     public function getReset()
     {
@@ -44,16 +49,18 @@ class Mark extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <pre>
      * if true, the stats will be reset after taking their snapshot.
-     * </pre>
      *
-     * <code>bool reset = 1;</code>
+     * Generated from protobuf field <code>bool reset = 1;</code>
+     * @param bool $var
+     * @return $this
      */
     public function setReset($var)
     {
         GPBUtil::checkBool($var);
         $this->reset = $var;
+
+        return $this;
     }
 
 }

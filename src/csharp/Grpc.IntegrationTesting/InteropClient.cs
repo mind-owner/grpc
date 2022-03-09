@@ -1,33 +1,18 @@
 #region Copyright notice and license
 
-// Copyright 2015-2016, Google Inc.
-// All rights reserved.
+// Copyright 2015-2016 gRPC authors.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//     * Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-// copyright notice, this list of conditions and the following disclaimer
-// in the documentation and/or other materials provided with the
-// distribution.
-//     * Neither the name of Google Inc. nor the names of its
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #endregion
 
@@ -60,7 +45,7 @@ namespace Grpc.IntegrationTesting
             [Option("server_host", Default = "localhost")]
             public string ServerHost { get; set; }
 
-            [Option("server_host_override", Default = TestCredentials.DefaultHostOverride)]
+            [Option("server_host_override")]
             public string ServerHostOverride { get; set; }
 
             [Option("server_port", Required = true)]
@@ -199,6 +184,9 @@ namespace Grpc.IntegrationTesting
                     break;
                 case "unimplemented_service":
                     RunUnimplementedService(new UnimplementedService.UnimplementedServiceClient(channel));
+                    break;
+                case "special_status_message":
+                    await RunSpecialStatusMessageAsync(client);
                     break;
                 case "unimplemented_method":
                     RunUnimplementedMethod(client);
@@ -488,8 +476,7 @@ namespace Grpc.IntegrationTesting
                 }
                 catch (RpcException ex)
                 {
-                    // We can't guarantee the status code always DeadlineExceeded. See issue #2685.
-                    Assert.Contains(ex.Status.StatusCode, new[] { StatusCode.DeadlineExceeded, StatusCode.Internal });
+                    Assert.AreEqual(StatusCode.DeadlineExceeded, ex.Status.StatusCode);
                 }
             }
             Console.WriteLine("Passed!");
@@ -577,6 +564,33 @@ namespace Grpc.IntegrationTesting
                     Assert.AreEqual(StatusCode.Unknown, e.Status.StatusCode);
                     Assert.AreEqual(echoStatus.Message, e.Status.Detail);
                 }
+            }
+
+            Console.WriteLine("Passed!");
+        }
+
+        private static async Task RunSpecialStatusMessageAsync(TestService.TestServiceClient client)
+        {
+            Console.WriteLine("running special_status_message");
+
+            var echoStatus = new EchoStatus
+            {
+                Code = 2,
+                Message = "\t\ntest with whitespace\r\nand Unicode BMP ☺ and non-BMP 😈\t\n"
+            };
+
+            try
+            {
+                await client.UnaryCallAsync(new SimpleRequest
+                {
+                    ResponseStatus = echoStatus
+                });
+                Assert.Fail();
+            }
+            catch (RpcException e)
+            {
+                Assert.AreEqual(StatusCode.Unknown, e.Status.StatusCode);
+                Assert.AreEqual(echoStatus.Message, e.Status.Detail);
             }
 
             Console.WriteLine("Passed!");

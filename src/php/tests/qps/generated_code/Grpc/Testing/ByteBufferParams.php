@@ -9,26 +9,37 @@ use Google\Protobuf\Internal\RepeatedField;
 use Google\Protobuf\Internal\GPBUtil;
 
 /**
- * Protobuf type <code>grpc.testing.ByteBufferParams</code>
+ * Generated from protobuf message <code>grpc.testing.ByteBufferParams</code>
  */
 class ByteBufferParams extends \Google\Protobuf\Internal\Message
 {
     /**
-     * <code>int32 req_size = 1;</code>
+     * Generated from protobuf field <code>int32 req_size = 1;</code>
      */
-    private $req_size = 0;
+    protected $req_size = 0;
     /**
-     * <code>int32 resp_size = 2;</code>
+     * Generated from protobuf field <code>int32 resp_size = 2;</code>
      */
-    private $resp_size = 0;
+    protected $resp_size = 0;
 
-    public function __construct() {
+    /**
+     * Constructor.
+     *
+     * @param array $data {
+     *     Optional. Data for populating the Message object.
+     *
+     *     @type int $req_size
+     *     @type int $resp_size
+     * }
+     */
+    public function __construct($data = NULL) {
         \GPBMetadata\Src\Proto\Grpc\Testing\Payloads::initOnce();
-        parent::__construct();
+        parent::__construct($data);
     }
 
     /**
-     * <code>int32 req_size = 1;</code>
+     * Generated from protobuf field <code>int32 req_size = 1;</code>
+     * @return int
      */
     public function getReqSize()
     {
@@ -36,16 +47,21 @@ class ByteBufferParams extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>int32 req_size = 1;</code>
+     * Generated from protobuf field <code>int32 req_size = 1;</code>
+     * @param int $var
+     * @return $this
      */
     public function setReqSize($var)
     {
         GPBUtil::checkInt32($var);
         $this->req_size = $var;
+
+        return $this;
     }
 
     /**
-     * <code>int32 resp_size = 2;</code>
+     * Generated from protobuf field <code>int32 resp_size = 2;</code>
+     * @return int
      */
     public function getRespSize()
     {
@@ -53,12 +69,16 @@ class ByteBufferParams extends \Google\Protobuf\Internal\Message
     }
 
     /**
-     * <code>int32 resp_size = 2;</code>
+     * Generated from protobuf field <code>int32 resp_size = 2;</code>
+     * @param int $var
+     * @return $this
      */
     public function setRespSize($var)
     {
         GPBUtil::checkInt32($var);
         $this->resp_size = $var;
+
+        return $this;
     }
 
 }
